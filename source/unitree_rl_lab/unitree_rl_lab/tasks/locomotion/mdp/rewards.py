@@ -91,6 +91,33 @@ def feet_stumble(env: ManagerBasedRLEnv, sensor_cfg: SceneEntityCfg) -> torch.Te
     return reward
 
 
+def feet_center(
+    env: ManagerBasedRLEnv,
+    sensor_cfg: SceneEntityCfg,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    command_name: str = "base_velocity",
+) -> torch.Tensor:
+    """Penalize stance feet that stay far from the robot-centered support region.
+
+    This uses the feet positions in the base frame and only counts feet that are in contact.
+    The term is scaled by the command magnitude so it matters primarily while the robot is moving.
+    """
+
+    contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
+    asset: Articulation = env.scene[asset_cfg.name]
+
+    contacts = torch.abs(contact_sensor.data.net_forces_w[:, sensor_cfg.body_ids, 2]) > 1.0
+    foot_pos_translated = asset.data.body_pos_w[:, asset_cfg.body_ids, :] - asset.data.root_pos_w[:, None, :]
+    foot_pos_b = torch.zeros_like(foot_pos_translated)
+    for i in range(len(asset_cfg.body_ids)):
+        foot_pos_b[:, i, :] = quat_apply_inverse(asset.data.root_quat_w, foot_pos_translated[:, i, :])
+    foot_center_penalty = torch.sum(torch.sum(torch.square(foot_pos_b), dim=-1) * contacts.float(), dim=1)
+
+    command = env.command_manager.get_command(command_name)
+    command_mag = torch.norm(command[:, :2], dim=1)
+    return foot_center_penalty * command_mag
+
+
 def feet_height_body(
     env: ManagerBasedRLEnv,
     command_name: str,

@@ -1,0 +1,64 @@
+# Copyright (c) 2022-2025, The Isaac Lab Project Developers.
+# All rights reserved.
+#
+# SPDX-License-Identifier: BSD-3-Clause
+
+from isaaclab.utils import configclass
+from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlPpoActorCriticCfg, RslRlPpoAlgorithmCfg
+
+
+@configclass
+class Go2MargOracleActorCriticCfg(RslRlPpoActorCriticCfg):
+    class_name = "unitree_rl_lab.tasks.locomotion.agents.go2_marg_oracle_actor_critic:Go2MargOracleActorCritic"
+
+    policy_raw_obs_dim = 45
+    policy_history_obs_dim = 225
+    policy_terrain_obs_dim = 187
+    privileged_obs_dim = 42
+
+    terrain_hidden_dims = [128, 64]
+    terrain_feat_dim = 16
+
+    estimator_hidden_dims = [256, 128]
+    estimator_output_dim = 7
+
+
+@configclass
+class Go2MargOraclePPOAlgorithmCfg(RslRlPpoAlgorithmCfg):
+    estimator_loss_coef = 1.0
+    velocity_loss_coef = 1.0
+    contact_loss_coef = 0.5
+
+
+@configclass
+class Go2MargOraclePPORunnerCfg(RslRlOnPolicyRunnerCfg):
+    """Task-specific PPO runner config for Unitree-Go2-MARG-Oracle-Velocity."""
+
+    runner_class_name = "unitree_rl_lab.tasks.locomotion.agents.go2_marg_oracle_runner:Go2MargOracleRunner"
+    num_steps_per_env = 24
+    max_iterations = 50000
+    save_interval = 100
+    experiment_name = "go2_marg_oracle_velocity"
+    empirical_normalization = False
+
+    policy = Go2MargOracleActorCriticCfg(
+        init_noise_std=1.0,
+        actor_hidden_dims=[256, 128, 64],
+        critic_hidden_dims=[256, 128, 64],
+        activation="elu",
+    )
+
+    algorithm = Go2MargOraclePPOAlgorithmCfg(
+        value_loss_coef=1.0,
+        use_clipped_value_loss=True,
+        clip_param=0.2,
+        entropy_coef=0.01,
+        num_learning_epochs=5,
+        num_mini_batches=4,
+        learning_rate=1.0e-3,
+        schedule="adaptive",
+        gamma=0.99,
+        lam=0.95,
+        desired_kl=0.01,
+        max_grad_norm=1.0,
+    )

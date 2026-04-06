@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 
 export UNITREE_RL_LAB_PATH="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+export PYTHONPATH="/home/zby/ISAAC/IsaacSim5.0:${PYTHONPATH}"
+
 
 if ! [[ -z "${CONDA_PREFIX}" ]]; then
     python_exe=${CONDA_PREFIX}/bin/python
@@ -77,6 +79,10 @@ case "$1" in
     -t|--train)
         shift
         ${python_exe} ${UNITREE_RL_LAB_PATH}/scripts/rsl_rl/train.py --headless "$@"
+        ;;
+    -r|--run)
+        shift
+        ${python_exe} "$@"
         ;;
     *) # unknown option
         ;;

@@ -9,8 +9,16 @@
 
 import argparse
 from importlib.metadata import version
+import pathlib
+import sys
 
 from isaaclab.app import AppLauncher
+
+# Import task packages early so custom workspace tasks are registered for --task in play mode.
+sys.path.insert(0, f"{pathlib.Path(__file__).parent.parent}")
+from list_envs import import_packages  # noqa: F401
+
+sys.path.pop(0)
 
 # local imports
 import cli_args  # isort: skip

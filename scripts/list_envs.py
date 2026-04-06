@@ -63,6 +63,11 @@ def import_packages():
         for _ in _walk_packages(package.__path__, package.__name__ + "."):
             pass
     sys.path.pop(0)
+    # Optional external task packs from workspace (e.g., LidarSim2Real custom tasks).
+    try:
+        importlib.import_module("LidarSim2Real.raycast.tasks")
+    except Exception:
+        pass
 
 
 import_packages()
