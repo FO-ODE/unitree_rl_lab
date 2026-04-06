@@ -122,7 +122,9 @@ class Go2MargOracleRunner:
         cur_reward_sum = torch.zeros(self.env.num_envs, dtype=torch.float, device=self.device)
         cur_episode_length = torch.zeros(self.env.num_envs, dtype=torch.float, device=self.device)
 
-        for it in range(self.current_learning_iteration, self.current_learning_iteration + num_learning_iterations):
+        start_iter = self.current_learning_iteration
+        tot_iter = start_iter + num_learning_iterations
+        for it in range(start_iter, tot_iter):
             start = time.time()
             with torch.inference_mode():
                 for _ in range(self.num_steps_per_env):
@@ -204,9 +206,10 @@ class Go2MargOracleRunner:
             self.writer.add_scalar("Train/mean_reward", statistics.mean(locs["rewbuffer"]), locs["it"])
             self.writer.add_scalar("Train/mean_episode_length", statistics.mean(locs["lenbuffer"]), locs["it"])
 
+        iter_header = f" Learning iteration {locs['it']}/{locs['tot_iter']} "
         log_string = (
             f"{'#' * width}\n"
-            f"{(' Learning iteration ' + str(locs['it']) + ' '):^{width}}\n\n"
+            f"{iter_header:^{width}}\n\n"
             f"{'Computation:':>{pad}} {fps:.0f} steps/s (collection: {locs['collection_time']:.3f}s, learning {locs['learn_time']:.3f}s)\n"
             f"{'Mean action noise std:':>{pad}} {mean_std.item():.2f}\n"
         )
@@ -221,5 +224,6 @@ class Go2MargOracleRunner:
             f"{'Total timesteps:':>{pad}} {self.tot_timesteps}\n"
             f"{'Iteration time:':>{pad}} {iteration_time:.2f}s\n"
             f"{'Time elapsed:':>{pad}} {time.strftime('%H:%M:%S', time.gmtime(self.tot_time))}\n"
+            f"{'ETA:':>{pad}} {time.strftime('%H:%M:%S', time.gmtime(self.tot_time / (locs['it'] - locs['start_iter'] + 1) * (locs['start_iter'] + locs['num_learning_iterations'] - locs['it'])))}\n"
         )
         print(log_string)
