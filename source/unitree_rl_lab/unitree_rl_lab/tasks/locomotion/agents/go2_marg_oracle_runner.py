@@ -74,6 +74,17 @@ class Go2MargOracleRunner:
     def eval_mode(self):
         self.alg.policy.eval()
 
+    def get_inference_policy(self, device=None):
+        self.eval_mode()
+        if device is not None:
+            self.alg.policy.to(device)
+
+        def policy(obs_dict: dict[str, torch.Tensor]) -> torch.Tensor:
+            actor_obs = {key: obs_dict[key].to(device or self.device) for key in self.actor_obs_keys}
+            return self.alg.policy.act_inference(actor_obs)
+
+        return policy
+
     def save(self, path: str, infos=None):
         torch.save(
             {
