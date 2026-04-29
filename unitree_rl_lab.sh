@@ -12,6 +12,21 @@ else
 fi
 
 
+_ut_setup_ros2_env() {
+    local ros2_setup_script=/opt/ros/humble/setup.bash
+
+    if [ -f "${ros2_setup_script}" ]; then
+        source "${ros2_setup_script}"
+    else
+        echo "[Warning] ROS 2 Humble setup script not found at ${ros2_setup_script}."
+    fi
+
+    if [[ -z "${RMW_IMPLEMENTATION}" ]]; then
+        export RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+    fi
+}
+
+
 # task env name autocomplete
 _ut_rl_lab_python_argcomplete_wrapper() {
     local IFS=$'\013'
@@ -74,14 +89,17 @@ case "$1" in
         ;;
     -p|--play)
         shift
+        _ut_setup_ros2_env
         ${python_exe} ${UNITREE_RL_LAB_PATH}/scripts/rsl_rl/play.py "$@"
         ;;
     -t|--train)
         shift
+        _ut_setup_ros2_env
         ${python_exe} ${UNITREE_RL_LAB_PATH}/scripts/rsl_rl/train.py --headless "$@"
         ;;
     -r|--run)
         shift
+        _ut_setup_ros2_env
         ${python_exe} "$@"
         ;;
     *) # unknown option
