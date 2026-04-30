@@ -9,6 +9,49 @@ if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
 
 
+def terminate_stationary_for_duration(
+    env: ManagerBasedRLEnv,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    command_name: str = "base_velocity",
+    duration: float = 5.0,
+    distance_threshold: float = 0.10,
+    command_speed_threshold: float = 0.05,
+) -> torch.Tensor:
+    """Terminate moving-command episodes if the robot stays near the same XY position too long."""
+
+    asset = env.scene[asset_cfg.name]
+    root_pos_xy = asset.data.root_pos_w[:, :2]
+
+    state_attr = f"_stationary_termination_{asset_cfg.name}"
+    state = getattr(env, state_attr, None)
+    if (
+        state is None
+        or state["anchor_pos_xy"].shape[0] != env.num_envs
+        or state["anchor_pos_xy"].device != env.device
+    ):
+        state = {
+            "anchor_pos_xy": root_pos_xy.clone(),
+            "stationary_time": torch.zeros(env.num_envs, dtype=torch.float32, device=env.device),
+        }
+        setattr(env, state_attr, state)
+
+    command = env.command_manager.get_command(command_name)
+    command_active = torch.linalg.norm(command[:, :2], dim=1) > command_speed_threshold
+    new_episode = env.episode_length_buf <= 1
+
+    moved_far_enough = torch.linalg.norm(root_pos_xy - state["anchor_pos_xy"], dim=1) > distance_threshold
+    reset_stationary_state = new_episode | moved_far_enough | ~command_active
+
+    state["anchor_pos_xy"] = torch.where(reset_stationary_state.unsqueeze(1), root_pos_xy, state["anchor_pos_xy"])
+    state["stationary_time"] = torch.where(
+        reset_stationary_state,
+        torch.zeros_like(state["stationary_time"]),
+        state["stationary_time"] + env.step_dt,
+    )
+
+    return state["stationary_time"] >= duration
+
+
 def terminate_feet_on_base_plane_selected_terrains(
     env: ManagerBasedRLEnv,
     sensor_cfg: SceneEntityCfg,

@@ -52,9 +52,9 @@ GO2_MARG_ORACLE_ROBOT_CFG = ROBOT_CFG.replace(
 @configclass
 class RobotSceneCfg(InteractiveSceneCfg):
     """Scene config for the Go2 Marg-Oracle velocity task."""
-
-    # num_envs: int = 12288
-    num_envs: int = 512
+    
+    # num_envs: int = 512
+    num_envs: int = 12288
     env_spacing: float = 2.5
 
     terrain = TerrainImporterCfg(
@@ -279,6 +279,16 @@ def reset_base_with_terrain_orientation(
 class TerminationsCfg(BaseTerminationsCfg):
     """Termination terms for the MDP."""
 
+    stationary = DoneTerm(
+        func=mdp.terminate_stationary_for_duration,
+        params={
+            "asset_cfg": SceneEntityCfg("robot"),
+            "command_name": "base_velocity",
+            "duration": 5.0,
+            "distance_threshold": 0.10,
+            "command_speed_threshold": 0.05,
+        },
+    )
     feet_on_base_plane_linear = DoneTerm(
         func=mdp.terminate_feet_on_base_plane_selected_terrains,
         params={

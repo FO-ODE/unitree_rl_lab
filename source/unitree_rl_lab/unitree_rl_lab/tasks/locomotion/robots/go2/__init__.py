@@ -19,7 +19,7 @@ gym.register(
         "env_cfg_entry_point": f"{__name__}.go2_marg_oracle_velocity_env_cfg:RobotEnvCfg",
         "play_env_cfg_entry_point": f"{__name__}.go2_marg_oracle_velocity_env_cfg:RobotPlayEnvCfg",
         "rsl_rl_cfg_entry_point": (
-            "unitree_rl_lab.tasks.locomotion.agents.go2_marg_oracle_rsl_rl_ppo_cfg:Go2MargOraclePPORunnerCfg"
+            "unitree_rl_lab.tasks.locomotion.agents.go2_marg_oracle_rsl_rl_ppo_cfg:Go2MargOracleVelocityPPORunnerCfg"
         ),
     },
 )
@@ -32,7 +32,7 @@ gym.register(
         "env_cfg_entry_point": f"{__name__}.go2_marg_oracle_risk_terrain_env_cfg:RobotEnvCfg",
         "play_env_cfg_entry_point": f"{__name__}.go2_marg_oracle_risk_terrain_env_cfg:RobotPlayEnvCfg",
         "rsl_rl_cfg_entry_point": (
-            "unitree_rl_lab.tasks.locomotion.agents.go2_marg_oracle_rsl_rl_ppo_cfg:Go2MargOraclePPORunnerCfg"
+            "unitree_rl_lab.tasks.locomotion.agents.go2_marg_oracle_rsl_rl_ppo_cfg:Go2MargOracleRiskTerrainPPORunnerCfg"
         ),
     },
 )

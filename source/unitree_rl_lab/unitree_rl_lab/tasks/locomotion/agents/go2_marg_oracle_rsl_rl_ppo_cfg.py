@@ -32,14 +32,22 @@ class Go2MargOraclePPOAlgorithmCfg(RslRlPpoAlgorithmCfg):
 
 @configclass
 class Go2MargOraclePPORunnerCfg(RslRlOnPolicyRunnerCfg):
-    """Task-specific PPO runner config for Unitree-Go2-MARG-Oracle-Velocity."""
+    """Task-specific PPO runner config for Unitree-Go2-MARG-Oracle tasks."""
 
     runner_class_name = "unitree_rl_lab.tasks.locomotion.agents.go2_marg_oracle_runner:Go2MargOracleRunner"
     num_steps_per_env = 24
     max_iterations = 50000
     save_interval = 100
+    task_type = "velocity"  # Can be "velocity" or "risk_terrain"
     experiment_name = "go2_marg_oracle_velocity"
     empirical_normalization = False
+
+    def __post_init__(self):
+        """Dynamically set experiment_name based on task_type."""
+        if self.task_type == "risk_terrain":
+            self.experiment_name = "go2_marg_oracle_risk_terrain"
+        elif self.task_type == "velocity":
+            self.experiment_name = "go2_marg_oracle_velocity"
 
     policy = Go2MargOracleActorCriticCfg(
         init_noise_std=1.0,
@@ -62,3 +70,18 @@ class Go2MargOraclePPORunnerCfg(RslRlOnPolicyRunnerCfg):
         desired_kl=0.01,
         max_grad_norm=1.0,
     )
+
+
+@configclass
+class Go2MargOracleVelocityPPORunnerCfg(Go2MargOraclePPORunnerCfg):
+    """PPO runner config for Unitree-Go2-MARG-Oracle-Velocity task."""
+
+    task_type = "velocity"
+
+
+@configclass
+class Go2MargOracleRiskTerrainPPORunnerCfg(Go2MargOraclePPORunnerCfg):
+    """PPO runner config for Unitree-Go2-MARG-Oracle-Risk-Terrain task."""
+
+    task_type = "risk_terrain"
+
