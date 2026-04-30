@@ -53,6 +53,10 @@ GO2_MARG_ORACLE_ROBOT_CFG = ROBOT_CFG.replace(
 class RobotSceneCfg(InteractiveSceneCfg):
     """Scene config for the Go2 Marg-Oracle velocity task."""
 
+    # num_envs: int = 12288
+    num_envs: int = 512
+    env_spacing: float = 2.5
+
     terrain = TerrainImporterCfg(
         prim_path="/World/ground",
         terrain_type="generator",
@@ -777,8 +781,7 @@ class CurriculumCfg:
 class RobotEnvCfg(BaseRobotEnvCfg):
     """Go2 Marg-Oracle velocity task config."""
 
-    # scene: RobotSceneCfg = RobotSceneCfg(num_envs=12288, env_spacing=2.5)
-    scene: RobotSceneCfg = RobotSceneCfg(num_envs=512, env_spacing=2.5)
+    scene: RobotSceneCfg = RobotSceneCfg()
     actions: ActionsCfg = ActionsCfg()
     observations: ObservationsCfg = ObservationsCfg()
     rewards: RewardsCfg = RewardsCfg()

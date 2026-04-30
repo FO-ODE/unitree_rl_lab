@@ -303,7 +303,7 @@ class MargRiskTerrainCfg(SubTerrainBaseCfg):
 
 
 MARG_RISK_TERRAIN_GENERATOR_CFG = TerrainGeneratorCfg(
-    size=(8.0, 8.0),
+    size=(10.0, 10.0),
     border_width=20.0,
     num_rows=8,
     num_cols=16,
