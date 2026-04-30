@@ -12,6 +12,7 @@ from isaaclab.managers import ObservationGroupCfg as ObsGroup
 from isaaclab.managers import ObservationTermCfg as ObsTerm
 from isaaclab.managers import RewardTermCfg as RewTerm
 from isaaclab.managers import SceneEntityCfg
+from isaaclab.managers import TerminationTermCfg as DoneTerm
 from isaaclab.scene import InteractiveSceneCfg
 from isaaclab.sensors import ContactSensorCfg, RayCasterCfg, patterns
 from isaaclab.terrains import TerrainImporterCfg
@@ -24,6 +25,7 @@ from unitree_rl_lab.tasks.locomotion import mdp
 from .marg_risk_terrain import MARG_RISK_TERRAIN_GENERATOR_CFG
 
 from .velocity_env_cfg import RobotEnvCfg as BaseRobotEnvCfg
+from .velocity_env_cfg import TerminationsCfg as BaseTerminationsCfg
 
 
 GO2_MARG_ORACLE_ROBOT_CFG = ROBOT_CFG.replace(
@@ -206,7 +208,7 @@ def reset_base_with_terrain_orientation(
     """Reset base position and orientation based on terrain type.
     
     For linear terrain types (stones_2rows, stones_balance, beams_balance, air_beams_balance),
-    the robot's initial yaw is set to 0 (facing x-axis direction).
+    the robot's initial yaw is set to either +x or -x direction.
     For other terrain types, yaw is randomized.
     """
     # Get the asset and terrain information
@@ -268,6 +270,22 @@ def reset_base_with_terrain_orientation(
     # Apply root state through Articulation APIs.
     asset.write_root_pose_to_sim(torch.cat([positions, orientations], dim=-1), env_ids=env_ids)
     asset.write_root_velocity_to_sim(velocities, env_ids=env_ids)
+
+
+@configclass
+class TerminationsCfg(BaseTerminationsCfg):
+    """Termination terms for the MDP."""
+
+    feet_on_base_plane_linear = DoneTerm(
+        func=mdp.terminate_feet_on_base_plane_selected_terrains,
+        params={
+            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*_foot"),
+            "asset_cfg": SceneEntityCfg("robot", body_names=".*_foot"),
+            "restricted_terrain_types": ("stones_2rows", "stones_balance", "beams_balance", "air_beams_balance"),
+            "force_threshold": 1.0,
+            "plane_height_threshold": 0.03,
+        },
+    )
 
 
 # =========================== Domain Randomization ===================
@@ -765,6 +783,7 @@ class RobotEnvCfg(BaseRobotEnvCfg):
     actions: ActionsCfg = ActionsCfg()
     observations: ObservationsCfg = ObservationsCfg()
     rewards: RewardsCfg = RewardsCfg()
+    terminations: TerminationsCfg = TerminationsCfg()
     events: EventCfg = EventCfg()
     curriculum: CurriculumCfg = CurriculumCfg()
 
