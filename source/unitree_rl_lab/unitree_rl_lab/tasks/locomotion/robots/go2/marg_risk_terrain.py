@@ -112,26 +112,6 @@ def _rng_from_seed(seed: int | None, difficulty: float, terrain_type: str) -> np
     return np.random.default_rng(hashed)
 
 
-def _terrain_style_for_level(level_id: int) -> Literal[
-    "single_gap",
-    "stones_everywhere",
-    "stones_2rows",
-    "stones_balance",
-    "beams_balance",
-    "air_beams_balance",
-]:
-    level_styles = {
-        1: "single_gap",
-        2: "stones_everywhere",
-        3: "stones_2rows",
-        4: "stones_balance",
-        5: "beams_balance",
-        6: "air_beams_balance",
-        7: "beams_balance",
-        8: "air_beams_balance",
-    }
-    return level_styles[level_id]
-
 
 def marg_risk_terrain(
     difficulty: float, cfg: "MargRiskTerrainCfg"
@@ -143,7 +123,7 @@ def marg_risk_terrain(
     """
 
     sx, sy = cfg.size
-    terrain_type = _terrain_type_from_seed(seed=getattr(cfg, "seed", None))
+    terrain_type = getattr(cfg, "terrain_type", None) or _terrain_type_from_seed(seed=getattr(cfg, "seed", None))
     params = TERRAIN_PARAMS_TABLE[terrain_type]
     rng = _rng_from_seed(seed=getattr(cfg, "seed", None), difficulty=difficulty, terrain_type=terrain_type)
     
@@ -314,6 +294,7 @@ class MargRiskTerrainCfg(SubTerrainBaseCfg):
 
     level_count: int = 8
     base_thickness: float = 0.08
+    terrain_type: str | None = None
 
     gap_range: tuple[float, float] = (0.10, 0.60)
     stone_size_range: tuple[float, float] = (0.80, 0.24)
@@ -333,6 +314,11 @@ MARG_RISK_TERRAIN_GENERATOR_CFG = TerrainGeneratorCfg(
     curriculum=True,
     use_cache=False,
     sub_terrains={
-        "marg_risk": MargRiskTerrainCfg(proportion=1.0),
+        "single_gap": MargRiskTerrainCfg(proportion=1 / 6, terrain_type="single_gap"),
+        "stones_everywhere": MargRiskTerrainCfg(proportion=1 / 6, terrain_type="stones_everywhere"),
+        "stones_2rows": MargRiskTerrainCfg(proportion=1 / 6, terrain_type="stones_2rows"),
+        "stones_balance": MargRiskTerrainCfg(proportion=1 / 6, terrain_type="stones_balance"),
+        "beams_balance": MargRiskTerrainCfg(proportion=1 / 6, terrain_type="beams_balance"),
+        "air_beams_balance": MargRiskTerrainCfg(proportion=1 / 6, terrain_type="air_beams_balance"),
     },
 )

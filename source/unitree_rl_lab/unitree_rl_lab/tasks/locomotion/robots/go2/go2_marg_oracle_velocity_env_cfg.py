@@ -723,7 +723,7 @@ class RewardsCfg:
 class RobotEnvCfg(BaseRobotEnvCfg):
     """Go2 Marg-Oracle velocity task config."""
 
-    scene: RobotSceneCfg = RobotSceneCfg(num_envs=8192, env_spacing=2.5)
+    scene: RobotSceneCfg = RobotSceneCfg(num_envs=12288, env_spacing=2.5)
     actions: ActionsCfg = ActionsCfg()
     observations: ObservationsCfg = ObservationsCfg()
     rewards: RewardsCfg = RewardsCfg()

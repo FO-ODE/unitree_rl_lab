@@ -1,8 +1,10 @@
 import math
 
 import torch
+import numpy as np
 import isaaclab.sim as sim_utils
 import isaaclab.terrains as terrain_gen
+import isaaclab.utils.math as math_utils
 from isaaclab.assets import ArticulationCfg, AssetBaseCfg
 from isaaclab.managers import CurriculumTermCfg as CurrTerm
 from isaaclab.managers import EventTermCfg as EventTerm
@@ -196,6 +198,77 @@ def randomize_motor_strength(
     )
 
 
+def reset_base_with_terrain_orientation(
+    env,
+    env_ids: torch.Tensor | None,
+    asset_cfg: SceneEntityCfg,
+):
+    """Reset base position and orientation based on terrain type.
+    
+    For linear terrain types (stones_2rows, stones_balance, beams_balance, air_beams_balance),
+    the robot's initial yaw is set to 0 (facing x-axis direction).
+    For other terrain types, yaw is randomized.
+    """
+    # Get the asset and terrain information
+    asset = env.scene[asset_cfg.name]
+    terrain = env.scene.terrain
+    
+    if env_ids is None:
+        env_ids = torch.arange(env.scene.num_envs, device=asset.device)
+    else:
+        env_ids = env_ids.to(asset.device)
+    
+    # Define terrain types that need fixed orientation
+    LINEAR_TERRAIN_TYPES = {"stones_2rows", "stones_balance", "beams_balance", "air_beams_balance"}
+    
+    # Get terrain column indices (which terrain column each env is on)
+    terrain_types = terrain.terrain_types[env_ids]
+    terrain_names = list(MARG_RISK_TERRAIN_GENERATOR_CFG.sub_terrains.keys())
+
+    # In curriculum terrains, terrain_types stores column index, not direct sub-terrain index.
+    proportions = np.array([sub_cfg.proportion for sub_cfg in MARG_RISK_TERRAIN_GENERATOR_CFG.sub_terrains.values()])
+    proportions = proportions / np.sum(proportions)
+    cumulative = np.cumsum(proportions)
+    
+    # Initialize from default root state to keep base height and nominal dynamics sane.
+    num_envs = len(env_ids)
+    root_states = asset.data.default_root_state[env_ids].clone()
+    pos_offsets = torch.zeros((num_envs, 3), device=asset.device)
+    velocities = root_states[:, 7:13].clone()
+    yaws = torch.empty((num_envs,), device=asset.device)
+    
+    # Randomize position in x-y within +-0.5m
+    pos_offsets[:, 0] = torch.rand(num_envs, device=asset.device) * 1.0 - 0.5
+    pos_offsets[:, 1] = torch.rand(num_envs, device=asset.device) * 1.0 - 0.5
+    
+    # Set yaw based on terrain type
+    for i, _env_id in enumerate(env_ids):
+        terrain_col = int(terrain_types[i].item())
+        ratio = terrain_col / float(MARG_RISK_TERRAIN_GENERATOR_CFG.num_cols) + 0.001
+        sub_index = int(np.searchsorted(cumulative, ratio, side="left"))
+
+        if sub_index >= len(terrain_names):
+            sub_index = len(terrain_names) - 1
+
+        terrain_name = terrain_names[sub_index]
+        if terrain_name in LINEAR_TERRAIN_TYPES:
+            # For linear terrains, spawn facing +x or -x with equal probability.
+            yaws[i] = 0.0 if torch.rand(1, device=asset.device).item() < 0.5 else math.pi
+        else:
+            yaws[i] = torch.rand(1, device=asset.device).item() * 2.0 * math.pi - math.pi
+
+    # Compose root pose: position in world frame + yaw-only orientation in quaternion.
+    positions = root_states[:, 0:3] + env.scene.env_origins[env_ids] + pos_offsets
+    orientations = math_utils.quat_from_euler_xyz(
+        torch.zeros_like(yaws),
+        torch.zeros_like(yaws),
+        yaws,
+    )
+
+    # Apply root state through Articulation APIs.
+    asset.write_root_pose_to_sim(torch.cat([positions, orientations], dim=-1), env_ids=env_ids)
+    asset.write_root_velocity_to_sim(velocities, env_ids=env_ids)
+
 
 # =========================== Domain Randomization ===================
 # ====================================================================
@@ -267,18 +340,10 @@ class EventCfg:
     )
 
     reset_base = EventTerm(
-        func=mdp.reset_root_state_uniform,
+        func=reset_base_with_terrain_orientation,
         mode="reset",
         params={
-            "pose_range": {"x": (-0.5, 0.5), "y": (-0.5, 0.5), "yaw": (-3.14, 3.14)},
-            "velocity_range": {
-                "x": (0.0, 0.0),
-                "y": (0.0, 0.0),
-                "z": (0.0, 0.0),
-                "roll": (0.0, 0.0),
-                "pitch": (0.0, 0.0),
-                "yaw": (0.0, 0.0),
-            },
+            "asset_cfg": SceneEntityCfg("robot", body_names="base"),
         },
     )
 
@@ -695,7 +760,8 @@ class CurriculumCfg:
 class RobotEnvCfg(BaseRobotEnvCfg):
     """Go2 Marg-Oracle velocity task config."""
 
-    scene: RobotSceneCfg = RobotSceneCfg(num_envs=8192, env_spacing=2.5)
+    # scene: RobotSceneCfg = RobotSceneCfg(num_envs=12288, env_spacing=2.5)
+    scene: RobotSceneCfg = RobotSceneCfg(num_envs=512, env_spacing=2.5)
     actions: ActionsCfg = ActionsCfg()
     observations: ObservationsCfg = ObservationsCfg()
     rewards: RewardsCfg = RewardsCfg()
@@ -713,6 +779,13 @@ class RobotEnvCfg(BaseRobotEnvCfg):
         else:
             if self.scene.terrain.terrain_generator is not None:
                 self.scene.terrain.terrain_generator.curriculum = False
+
+        # Restrict sideways/yaw commands only on linear terrain types.
+        linear_terrains = {"stones_2rows", "stones_balance", "beams_balance", "air_beams_balance"}
+        terrain_names = set(self.scene.terrain.terrain_generator.sub_terrains.keys())
+
+        if terrain_names & linear_terrains:
+            self.commands.base_velocity.restricted_terrain_types = tuple(sorted(terrain_names & linear_terrains))
 
 
 @configclass
