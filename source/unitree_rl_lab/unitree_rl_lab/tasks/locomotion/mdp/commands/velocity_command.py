@@ -10,7 +10,7 @@ from isaaclab.utils import configclass
 
 
 class TerrainAwareUniformVelocityCommand(UniformVelocityCommand):
-    """Uniform velocity command with optional terrain-type-specific y/yaw restriction."""
+    """Uniform velocity command with optional terrain-type-specific x/y/yaw restriction."""
 
     cfg: "UniformLevelVelocityCommandCfg"
 
@@ -66,7 +66,8 @@ class TerrainAwareUniformVelocityCommand(UniformVelocityCommand):
         restricted_env_ids = env_ids_tensor[restricted_mask]
         r = torch.empty(len(restricted_env_ids), device=self.device)
 
-        # Only constrain sideways and yaw commands on selected terrain types.
+        # Only constrain forward, sideways, and yaw commands on selected terrain types.
+        self.vel_command_b[restricted_env_ids, 0] = r.uniform_(*self.cfg.restricted_ranges.lin_vel_x)
         self.vel_command_b[restricted_env_ids, 1] = r.uniform_(*self.cfg.restricted_ranges.lin_vel_y)
         self.vel_command_b[restricted_env_ids, 2] = r.uniform_(*self.cfg.restricted_ranges.ang_vel_z)
 
@@ -82,7 +83,7 @@ class UniformLevelVelocityCommandCfg(UniformVelocityCommandCfg):
     limit_ranges: UniformVelocityCommandCfg.Ranges = MISSING
     restricted_terrain_types: tuple[str, ...] = ()
     restricted_ranges: UniformVelocityCommandCfg.Ranges = UniformVelocityCommandCfg.Ranges(
-        lin_vel_x=(-1.0, 1.0),
+        lin_vel_x=(0.1, 1.0),
         lin_vel_y=(-0.01, 0.01),
         ang_vel_z=(-0.01, 0.01),
     )

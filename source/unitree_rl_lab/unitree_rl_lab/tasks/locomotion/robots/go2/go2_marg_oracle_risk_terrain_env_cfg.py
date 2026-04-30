@@ -254,8 +254,7 @@ def reset_base_with_terrain_orientation(
 
         terrain_name = terrain_names[sub_index]
         if terrain_name in LINEAR_TERRAIN_TYPES:
-            # For linear terrains, spawn facing +x or -x with equal probability.
-            yaws[i] = 0.0 if torch.rand(1, device=asset.device).item() < 0.5 else math.pi
+            yaws[i] = 0.0
         else:
             yaws[i] = torch.rand(1, device=asset.device).item() * 2.0 * math.pi - math.pi
 
