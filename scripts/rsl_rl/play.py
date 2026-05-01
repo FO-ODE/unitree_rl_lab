@@ -43,7 +43,7 @@ parser.add_argument("--keyboard", action="store_true", default=False, help="Use 
 parser.add_argument("--keyboard_vx", type=float, default=1.0, help="Keyboard forward/backward velocity scale.")
 parser.add_argument("--keyboard_vy", type=float, default=1.0, help="Keyboard lateral velocity scale.")
 parser.add_argument("--keyboard_wz", type=float, default=1.0, help="Keyboard yaw velocity scale.")
-parser.add_argument("--keyboard_smoothing", type=float, default=0.15, help="Low-pass factor for keyboard commands.")
+parser.add_argument("--keyboard_smoothing", type=float, default=0.3, help="Low-pass factor for keyboard commands.")
 parser.add_argument("--follow_camera_distance", type=float, default=3, help="Follow camera distance behind robot.")
 parser.add_argument("--follow_camera_height", type=float, default=1.4, help="Follow camera height above robot.")
 parser.add_argument("--follow_camera_yaw", type=float, default=-30.0, help="Follow camera yaw offset in degrees.")
@@ -294,6 +294,8 @@ def main():
                     (1.0 - args_cli.keyboard_smoothing) * filtered_keyboard_command
                     + args_cli.keyboard_smoothing * raw_command
                 )
+                # Clamp very small velocities to zero to avoid micro-oscillations in standing pose
+                filtered_keyboard_command[torch.abs(filtered_keyboard_command) < 1.0e-3] = 0.0
                 command = filtered_keyboard_command
                 if torch.linalg.norm(raw_command) < 1.0e-4 and torch.linalg.norm(command) < 1.0e-3:
                     filtered_keyboard_command.zero_()

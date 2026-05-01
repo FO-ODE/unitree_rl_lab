@@ -736,7 +736,7 @@ class RobotPlayEnvCfg(RobotEnvCfg):
 
     def __post_init__(self):
         super().__post_init__()
-        self.scene.num_envs = 64
+        self.scene.num_envs = 256
         self.scene.terrain.terrain_generator.num_rows = 3
         self.scene.terrain.terrain_generator.num_cols = 5
         self.commands.base_velocity.ranges = self.commands.base_velocity.limit_ranges
