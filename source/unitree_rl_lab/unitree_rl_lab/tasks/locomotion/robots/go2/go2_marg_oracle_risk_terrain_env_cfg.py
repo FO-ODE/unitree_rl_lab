@@ -54,7 +54,7 @@ class RobotSceneCfg(InteractiveSceneCfg):
     """Scene config for the Go2 Marg-Oracle velocity task."""
     
     # num_envs: int = 512
-    num_envs: int = 12288
+    num_envs: int = 8192
     env_spacing: float = 2.5
 
     terrain = TerrainImporterCfg(
