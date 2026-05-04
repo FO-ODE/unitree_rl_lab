@@ -57,6 +57,8 @@ def terminate_feet_on_base_plane_selected_terrains(
     sensor_cfg: SceneEntityCfg,
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot", body_names=".*_foot"),
     restricted_terrain_types: tuple[str, ...] = (
+        "single_gap",
+        "stones_everywhere",
         "stones_2rows",
         "stones_balance",
         "beams_balance",
@@ -65,12 +67,12 @@ def terminate_feet_on_base_plane_selected_terrains(
     force_threshold: float = 1.0,
     plane_height_threshold: float = -0.2,
 ) -> torch.Tensor:
-    """Terminate if feet touch the low base plane on selected terrain types.
+    """Terminate if the foot sole drops to or below the base-plane height on selected terrain types.
 
     Notes:
     - Terrain assignment in generator mode is column-based (`terrain_types` stores column index).
     - This function reconstructs the curriculum column->sub-terrain mapping from proportions.
-    - Base plane contact is approximated using low foot height near env origin z and non-trivial contact force.
+    - The termination condition is based on foot sole height relative to the environment origin.
     """
 
     device = env.device
@@ -105,15 +107,10 @@ def terminate_feet_on_base_plane_selected_terrains(
     if not torch.any(selected_terrain_mask):
         return torch.zeros(num_envs, dtype=torch.bool, device=device)
 
-    contact_sensor = env.scene.sensors[sensor_cfg.name]
     asset = env.scene[asset_cfg.name]
-
-    forces_z = torch.abs(contact_sensor.data.net_forces_w[:, sensor_cfg.body_ids, 2])
-    feet_in_contact = forces_z > force_threshold
 
     feet_z = asset.data.body_pos_w[:, asset_cfg.body_ids, 2]
     env_origin_z = env.scene.env_origins[:, 2].unsqueeze(1)
-    on_base_plane = (feet_z - env_origin_z) <= plane_height_threshold
+    foot_sole_below_threshold = (feet_z - env_origin_z) <= plane_height_threshold
 
-    feet_base_plane_contact = feet_in_contact & on_base_plane
-    return torch.any(feet_base_plane_contact, dim=1) & selected_terrain_mask
+    return torch.any(foot_sole_below_threshold, dim=1) & selected_terrain_mask

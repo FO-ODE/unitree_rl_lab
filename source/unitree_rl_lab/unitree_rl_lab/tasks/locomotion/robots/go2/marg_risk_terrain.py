@@ -135,7 +135,7 @@ def marg_risk_terrain(
     base_ground = _make_box_xy(
         size_x=sx,
         size_y=sy,
-        top_z=-0.2,
+        top_z=-0.22,
         height=cfg.base_thickness,
         center_x=0.5 * sx,
         center_y=0.5 * sy,
