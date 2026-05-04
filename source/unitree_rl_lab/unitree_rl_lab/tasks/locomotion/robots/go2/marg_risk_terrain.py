@@ -112,6 +112,12 @@ def _rng_from_seed(seed: int | None, difficulty: float, terrain_type: str) -> np
     return np.random.default_rng(hashed)
 
 
+def _snap_to_nearest(values: np.ndarray, target: float) -> float:
+    if values.size == 0:
+        return float(target)
+    idx = int(np.argmin(np.abs(values - target)))
+    return float(values[idx])
+
 
 def marg_risk_terrain(
     difficulty: float, cfg: "MargRiskTerrainCfg"
@@ -144,13 +150,35 @@ def marg_risk_terrain(
     meshes.append(base_ground)
 
     # Shared spawn region keeps resets stable while still forcing traversal to harder zones.
+    # Spawn platform: use configurable size/height/center from cfg
+    spawn_size_x, spawn_size_y = cfg.spawn_size
+    spawn_center_x = float(cfg.spawn_center[0]) * sx
+    spawn_center_y = float(cfg.spawn_center[1]) * sy
+
+    # For stones_everywhere, align spawn center to the nearest stone-grid center so the
+    # merged 3x3/5x5/... platform center is exactly the middle tile center.
+    if terrain_type == "stones_everywhere":
+        stone_size_for_spawn = _lerp_from_keyframes(params["stone_size_range"], difficulty)
+        pitch_for_spawn = stone_size_for_spawn + gap_size
+        x_grid = np.arange(0.7, sx - 0.7, pitch_for_spawn)
+        y_grid = np.arange(0.4, sy - 0.4, pitch_for_spawn)
+        spawn_center_x = _snap_to_nearest(x_grid, spawn_center_x)
+        spawn_center_y = _snap_to_nearest(y_grid, spawn_center_y)
+
+    # Keep spawn top surface fixed at world z=0. Larger spawn_height makes the
+    # platform thicker downward instead of raising its top.
+    spawn_height = cfg.spawn_height if cfg.spawn_height is not None else 1.0
+    terrain_max_height = _lerp_from_keyframes(params.get("height_range", [0.0, 0.0, 0.0]), difficulty)
+    spawn_top_z = cfg.base_thickness + 0.5 * terrain_max_height
+    
+
     spawn = _make_box_xy(
-        size_x=1.4,
-        size_y=1.4,
-        top_z=cfg.base_thickness,
-        height=cfg.base_thickness * 0.5,
-        center_x=0.5 * sx,
-        center_y=0.5 * sy,
+        size_x=spawn_size_x,
+        size_y=spawn_size_y,
+        top_z=spawn_top_z,
+        height=spawn_height,
+        center_x=spawn_center_x,
+        center_y=spawn_center_y,
     )
     meshes.append(spawn)
 
@@ -189,10 +217,29 @@ def marg_risk_terrain(
         x_end = sx - 0.7
         y_start = 0.4
         y_end = sy - 0.4
+
+        # Merge central stones into one flat block.
+        # Start from 3x3 (9 tiles) and keep odd expansion (5x5, 7x7, ...)
+        # until merged platform area is at least 1.4m x 1.4m.
+        min_center_area = 1.4 * 1.4
+        merged_count = 3
+        merged_side = merged_count * stone_size + (merged_count - 1) * gap_size
+        while merged_side * merged_side < min_center_area:
+            merged_count += 2
+            merged_side = merged_count * stone_size + (merged_count - 1) * gap_size
+        center_x = spawn_center_x
+        center_y = spawn_center_y
+
         x_vals = np.arange(x_start, x_end, pitch)
         y_vals = np.arange(y_start, y_end, pitch)
         for cx in x_vals:
             for cy in y_vals:
+                # Skip stones that would overlap the merged center platform.
+                if (
+                    abs(float(cx) - center_x) < 0.5 * (merged_side + stone_size)
+                    and abs(float(cy) - center_y) < 0.5 * (merged_side + stone_size)
+                ):
+                    continue
                 top_z = cfg.base_thickness + rng.uniform(0.0, max_height)
                 meshes.append(
                     _make_box_xy(
@@ -205,6 +252,18 @@ def marg_risk_terrain(
                     )
                 )
 
+        # spawn
+        meshes.append(
+            _make_box_xy(
+                size_x=merged_side,
+                size_y=merged_side,
+                top_z=spawn_top_z,
+                height=cfg.base_thickness,
+                center_x=center_x,
+                center_y=center_y,
+            )
+        )
+
     elif terrain_type == "stones_2rows":
         stone_size = _lerp_from_keyframes(params["stone_size_range"], difficulty)
         max_height = _lerp_from_keyframes(params["height_range"], difficulty)
@@ -213,6 +272,7 @@ def marg_risk_terrain(
         y_offsets = (-0.3, 0.3)
         for cx in x_vals:
             for offset in y_offsets:
+                cy = float(0.5 * sy + offset)
                 top_z = cfg.base_thickness + rng.uniform(0.0, max_height)
                 meshes.append(
                     _make_box_xy(
@@ -221,7 +281,7 @@ def marg_risk_terrain(
                         top_z=top_z,
                         height=max(cfg.base_thickness * 0.7, top_z + cfg.base_thickness),
                         center_x=float(cx),
-                        center_y=float(0.5 * sy + offset),
+                        center_y=cy,
                     )
                 )
 
@@ -271,8 +331,8 @@ def marg_risk_terrain(
         pitch = beam_width + gap_size
         x_vals = np.arange(0.8, sx - 0.8, pitch)
         for cx in x_vals:
+            cy = float(0.5 * sy + rng.uniform(-0.15, 0.15))
             top_z = cfg.base_thickness + rng.uniform(max(0.02, 0.02), max_height)
-            y_jitter = rng.uniform(-0.15, 0.15)
             meshes.append(
                 _make_box_xy(
                     size_x=beam_width,
@@ -280,11 +340,12 @@ def marg_risk_terrain(
                     top_z=top_z,
                     height=max(cfg.base_thickness * 0.7, top_z + cfg.base_thickness),
                     center_x=float(cx),
-                    center_y=float(0.5 * sy + y_jitter),
+                    center_y=cy,
                 )
             )
 
-    origin = np.array([0.5 * sx, 0.5 * sy, 0.0])
+    # Keep a small clearance above spawn surface to avoid initial interpenetration.
+    origin = np.array([spawn_center_x, spawn_center_y, spawn_top_z + 0.02])
     return meshes, origin
 
 
@@ -300,6 +361,13 @@ class MargRiskTerrainCfg(SubTerrainBaseCfg):
     stone_size_range: tuple[float, float] = (0.80, 0.24)
     beam_width_range: tuple[float, float] = (0.30, 0.12)
     height_range: tuple[float, float] = (0.00, 0.44)
+    # Spawn platform customization:
+    # - `spawn_size`: (width_x, width_y) in meters
+    # - `spawn_height`: height in meters; if None uses 0.16
+    # - `spawn_center`: fractions (0..1) of terrain size (sx, sy), default center (0.5, 0.5)
+    spawn_size: tuple[float, float] = (1.5, 1.5)
+    spawn_height: float | None = 0.16
+    spawn_center: tuple[float, float] = (0.5, 0.5)
 
 
 MARG_RISK_TERRAIN_GENERATOR_CFG = TerrainGeneratorCfg(
