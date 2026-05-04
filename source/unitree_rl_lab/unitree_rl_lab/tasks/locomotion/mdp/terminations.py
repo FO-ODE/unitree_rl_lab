@@ -63,7 +63,7 @@ def terminate_feet_on_base_plane_selected_terrains(
         "air_beams_balance",
     ),
     force_threshold: float = 1.0,
-    plane_height_threshold: float = 0.03,
+    plane_height_threshold: float = -0.2,
 ) -> torch.Tensor:
     """Terminate if feet touch the low base plane on selected terrain types.
 

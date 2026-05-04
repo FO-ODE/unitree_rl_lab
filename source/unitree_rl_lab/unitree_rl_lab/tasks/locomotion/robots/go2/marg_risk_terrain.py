@@ -135,7 +135,7 @@ def marg_risk_terrain(
     base_ground = _make_box_xy(
         size_x=sx,
         size_y=sy,
-        top_z=0.0,
+        top_z=-0.2,
         height=cfg.base_thickness,
         center_x=0.5 * sx,
         center_y=0.5 * sy,
@@ -145,8 +145,15 @@ def marg_risk_terrain(
     # Shared spawn region keeps resets stable while still forcing traversal to harder zones.
     # Spawn platform: use configurable size/height/center from cfg
     spawn_size_x, spawn_size_y = cfg.spawn_size
-    spawn_center_x = float(cfg.spawn_center[0]) * sx
     spawn_center_y = float(cfg.spawn_center[1]) * sy
+    if terrain_type == "single_gap" or terrain_type == "stones_everywhere":
+        spawn_center_x = float(cfg.spawn_center[0]) * sx
+    else:
+        spawn_center_x = 0.0
+        
+        
+    
+    
 
     # For stones_everywhere, align spawn center to the nearest stone-grid center so the
     # merged 3x3/5x5/... platform center is exactly the middle tile center.
@@ -174,32 +181,115 @@ def marg_risk_terrain(
     )
     meshes.append(spawn)
 
-    if terrain_type == "single_gap":
-        gap_center_x = 0.7 * sx
-        left_len = max(1.2, gap_center_x - 0.5 * gap_size)
-        right_start = gap_center_x + 0.5 * gap_size
-        right_len = max(1.2, sx - right_start)
 
+    if terrain_type == "single_gap":
+        # Compute spawn boundaries
+
+        # Four rectangular blocks with gap_size distance from spawn edges
+        axial_expansion = 1.5
+        radial_expansion_1 = 3*1.5 + 2*gap_size
+
+        # y positive block 1
         meshes.append(
             _make_box_xy(
-                size_x=left_len,
-                size_y=sy,
+                size_x=radial_expansion_1, 
+                size_y=axial_expansion,
                 top_z=cfg.base_thickness,
                 height=cfg.base_thickness,
-                center_x=0.5 * left_len,
+                center_x=0.5 * sx,
+                center_y=0.5 * sy + 0.75 + gap_size + 0.5 * axial_expansion,
+            )
+        )
+        
+        # y negative block 1
+        meshes.append(
+            _make_box_xy(
+                size_x=radial_expansion_1, 
+                size_y=axial_expansion,
+                top_z=cfg.base_thickness,
+                height=cfg.base_thickness,
+                center_x=0.5 * sx,
+                center_y=0.5 * sy -0.75 - gap_size - 0.5*axial_expansion,
+            )
+        )
+
+        # x positive block 1
+        meshes.append(
+            _make_box_xy(
+                size_x=axial_expansion,
+                size_y=radial_expansion_1,
+                top_z=cfg.base_thickness,
+                height=cfg.base_thickness,
+                center_x=0.5 * sx + 0.75 + gap_size + 0.5 * axial_expansion,
                 center_y=0.5 * sy,
             )
         )
+        
+        # x negative block 1
         meshes.append(
             _make_box_xy(
-                size_x=right_len,
-                size_y=sy,
+                size_x=axial_expansion,  
+                size_y=radial_expansion_1,
                 top_z=cfg.base_thickness,
                 height=cfg.base_thickness,
-                center_x=right_start + 0.5 * right_len,
+                center_x=0.5 * sx -0.75 - gap_size - 0.5 * axial_expansion,
                 center_y=0.5 * sy,
             )
         )
+        
+        # Four rectangular blocks with gap_size distance from spawn edges
+        axial_expansion_2 = (sx - radial_expansion_1 - 2*gap_size)/2
+        radial_expansion_2 = sx
+        
+
+        # y positive block 2
+        meshes.append(
+            _make_box_xy(
+                size_x=radial_expansion_2, 
+                size_y=axial_expansion_2,
+                top_z=cfg.base_thickness,
+                height=cfg.base_thickness,
+                center_x=0.5 * sx,
+                center_y=0.5 * sy + 0.75 + gap_size + axial_expansion + gap_size + 0.5 * axial_expansion_2,
+            )
+        )
+
+        # y negative block 2
+        meshes.append(
+            _make_box_xy(
+                size_x=radial_expansion_2, 
+                size_y=axial_expansion_2,
+                top_z=cfg.base_thickness,
+                height=cfg.base_thickness,
+                center_x=0.5 * sx,
+                center_y=0.5 * sy -0.75 - gap_size - axial_expansion - gap_size - 0.5 * axial_expansion_2,
+            )
+        )
+        
+        # x positive block 2
+        meshes.append(
+            _make_box_xy(
+                size_x=axial_expansion_2,
+                size_y=radial_expansion_2,
+                top_z=cfg.base_thickness,
+                height=cfg.base_thickness,
+                center_x=0.5 * sx + 0.75 + gap_size + axial_expansion + gap_size + 0.5 * axial_expansion_2,
+                center_y=0.5 * sy,
+            )
+        )
+        
+        # x negative block 2
+        meshes.append(
+            _make_box_xy(
+                size_x=axial_expansion_2,  
+                size_y=radial_expansion_2,
+                top_z=cfg.base_thickness,
+                height=cfg.base_thickness,
+                center_x=0.5 * sx -0.75 - gap_size - axial_expansion - gap_size - 0.5 * axial_expansion_2,
+                center_y=0.5 * sy,
+            )
+        )
+
 
     elif terrain_type == "stones_everywhere":
         stone_size = _lerp_from_keyframes(params["stone_size_range"], difficulty)
