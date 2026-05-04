@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import Literal
-
 import numpy as np
 import trimesh
 
@@ -9,7 +7,7 @@ from isaaclab.terrains import SubTerrainBaseCfg, TerrainGeneratorCfg
 from isaaclab.utils import configclass
 
 
-# Terrain parameter table: each terrain type has 3 difficulty levels (1, 4, 8)
+# Terrain parameter table: each terrain type has 8 difficulty levels
 # Parameters are [level_1_value, level_4_value, level_8_value]
 TERRAIN_PARAMS_TABLE = {
     "single_gap": {
@@ -99,11 +97,6 @@ def _terrain_type_from_seed(seed: int | None) -> str:
     return TERRAIN_TYPES[terrain_idx]
 
 
-def _level_from_difficulty(difficulty: float, level_count: int) -> int:
-    clamped = float(np.clip(difficulty, 0.0, 1.0))
-    return int(np.floor(clamped * level_count)) + 1
-
-
 def _rng_from_seed(seed: int | None, difficulty: float, terrain_type: str) -> np.random.Generator:
     base = 0 if seed is None else int(seed)
     diff_term = int(round(float(difficulty) * 1_000_000.0))
@@ -165,9 +158,8 @@ def marg_risk_terrain(
         spawn_center_x = _snap_to_nearest(x_grid, spawn_center_x)
         spawn_center_y = _snap_to_nearest(y_grid, spawn_center_y)
 
-    # Keep spawn top surface fixed at world z=0. Larger spawn_height makes the
-    # platform thicker downward instead of raising its top.
-    spawn_height = cfg.spawn_height if cfg.spawn_height is not None else 1.0
+    # Keep spawn top_z behavior unchanged; use fixed 1m spawn thickness.
+    spawn_height = 1.0
     terrain_max_height = _lerp_from_keyframes(params.get("height_range", [0.0, 0.0, 0.0]), difficulty)
     spawn_top_z = cfg.base_thickness + 0.5 * terrain_max_height
     
@@ -246,7 +238,7 @@ def marg_risk_terrain(
                         size_x=stone_size,
                         size_y=stone_size,
                         top_z=top_z,
-                        height=max(cfg.base_thickness * 0.7, top_z + cfg.base_thickness),
+                        height=1,
                         center_x=float(cx),
                         center_y=float(cy),
                     )
@@ -258,7 +250,7 @@ def marg_risk_terrain(
                 size_x=merged_side,
                 size_y=merged_side,
                 top_z=spawn_top_z,
-                height=cfg.base_thickness,
+                height=1,
                 center_x=center_x,
                 center_y=center_y,
             )
@@ -332,7 +324,7 @@ def marg_risk_terrain(
         x_vals = np.arange(0.8, sx - 0.8, pitch)
         for cx in x_vals:
             cy = float(0.5 * sy + rng.uniform(-0.15, 0.15))
-            top_z = cfg.base_thickness + rng.uniform(max(0.02, 0.02), max_height)
+            top_z = cfg.base_thickness + rng.uniform(0.02, max_height)
             meshes.append(
                 _make_box_xy(
                     size_x=beam_width,
@@ -363,10 +355,10 @@ class MargRiskTerrainCfg(SubTerrainBaseCfg):
     height_range: tuple[float, float] = (0.00, 0.44)
     # Spawn platform customization:
     # - `spawn_size`: (width_x, width_y) in meters
-    # - `spawn_height`: height in meters; if None uses 0.16
+    # - `spawn_height`: height in meters (kept at 1.0m in terrain generation)
     # - `spawn_center`: fractions (0..1) of terrain size (sx, sy), default center (0.5, 0.5)
     spawn_size: tuple[float, float] = (1.5, 1.5)
-    spawn_height: float | None = 0.16
+    spawn_height: float | None = 1.0
     spawn_center: tuple[float, float] = (0.5, 0.5)
 
 
