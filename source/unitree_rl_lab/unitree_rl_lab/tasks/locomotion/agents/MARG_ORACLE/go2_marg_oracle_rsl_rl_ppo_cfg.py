@@ -9,7 +9,7 @@ from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlPpoActorCriticCfg, R
 
 @configclass
 class Go2MargOracleActorCriticCfg(RslRlPpoActorCriticCfg):
-    class_name = "unitree_rl_lab.tasks.locomotion.agents.go2_marg_oracle_actor_critic:Go2MargOracleActorCritic"
+    class_name = "unitree_rl_lab.tasks.locomotion.agents.MARG_ORACLE.go2_marg_oracle_actor_critic:Go2MargOracleActorCritic"
 
     policy_raw_obs_dim = 45
     policy_history_obs_dim = 225
@@ -34,7 +34,7 @@ class Go2MargOraclePPOAlgorithmCfg(RslRlPpoAlgorithmCfg):
 class Go2MargOraclePPORunnerCfg(RslRlOnPolicyRunnerCfg):
     """Task-specific PPO runner config for Unitree-Go2-MARG-Oracle tasks."""
 
-    runner_class_name = "unitree_rl_lab.tasks.locomotion.agents.go2_marg_oracle_runner:Go2MargOracleRunner"
+    runner_class_name = "unitree_rl_lab.tasks.locomotion.agents.MARG_ORACLE.go2_marg_oracle_runner:Go2MargOracleRunner"
     num_steps_per_env = 24
     max_iterations = 50000
     save_interval = 100
