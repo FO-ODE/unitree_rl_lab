@@ -54,7 +54,7 @@ class RobotSceneCfg(InteractiveSceneCfg):
     """Scene config for the Go2 Marg-Oracle velocity task."""
     
     # num_envs: int = 512
-    num_envs: int = 8192
+    num_envs: int = 4096
     env_spacing: float = 2.5
 
     terrain = TerrainImporterCfg(
@@ -296,7 +296,7 @@ class TerminationsCfg(BaseTerminationsCfg):
             "asset_cfg": SceneEntityCfg("robot", body_names=".*_foot"),
             "restricted_terrain_types": ("stones_2rows", "stones_balance", "beams_balance", "air_beams_balance"),
             "force_threshold": 1.0,
-            "plane_height_threshold": 0.03,
+            "plane_height_threshold": -0.2,
         },
     )
 
