@@ -60,7 +60,8 @@ def terminate_feet_on_base_plane_selected_terrains(
     force_threshold: float = 1.0,
     plane_height_threshold: float = -0.2,
 ) -> torch.Tensor:
-    """Terminate if the foot sole drops to or below the base-plane height on selected terrain types.
+    """
+    Terminate if the foot sole drops to or below the base-plane height on selected terrain types.
 
     Notes:
     - Terrain assignment in generator mode is column-based (`terrain_types` stores column index).

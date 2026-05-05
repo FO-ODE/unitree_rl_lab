@@ -776,9 +776,14 @@ class RewardsCfg:
 # =========================================================================
 @configclass
 class CurriculumCfg:
-    """Curriculum terms for the MDP."""
+    """Curriculum terms for the MDP.
+    
+    Note: All curriculum functions are imported from unitree_rl_lab.tasks.locomotion.mdp
+    """
 
+    # Curriculum for terrain level progression based on robot performance
     terrain_levels = CurrTerm(func=mdp.terrain_levels_vel)
+    # Curriculum for velocity command range progression
     lin_vel_cmd_levels = CurrTerm(mdp.lin_vel_cmd_levels)
 
 
