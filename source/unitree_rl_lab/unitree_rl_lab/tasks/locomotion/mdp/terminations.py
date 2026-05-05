@@ -56,14 +56,7 @@ def terminate_feet_on_base_plane_selected_terrains(
     env: ManagerBasedRLEnv,
     sensor_cfg: SceneEntityCfg,
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot", body_names=".*_foot"),
-    restricted_terrain_types: tuple[str, ...] = (
-        "single_gap",
-        "stones_everywhere",
-        "stones_2rows",
-        "stones_balance",
-        "beams_balance",
-        "air_beams_balance",
-    ),
+    restricted_terrain_types: tuple[str, ...] | None = None,
     force_threshold: float = 1.0,
     plane_height_threshold: float = -0.2,
 ) -> torch.Tensor:
@@ -83,6 +76,9 @@ def terminate_feet_on_base_plane_selected_terrains(
     terrain_names = list(sub_terrains.keys())
     if len(terrain_names) == 0:
         return torch.zeros(num_envs, dtype=torch.bool, device=device)
+
+    if restricted_terrain_types is None:
+        restricted_terrain_types = tuple(terrain_names)
 
     restricted_name_set = set(restricted_terrain_types)
     restricted_sub_indices = [i for i, name in enumerate(terrain_names) if name in restricted_name_set]

@@ -294,7 +294,6 @@ class TerminationsCfg(BaseTerminationsCfg):
         params={
             "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*_foot"),
             "asset_cfg": SceneEntityCfg("robot", body_names=".*_foot"),
-            "restricted_terrain_types": ("stones_2rows", "stones_balance", "beams_balance", "air_beams_balance"),
             "force_threshold": 1.0,
             "plane_height_threshold": -0.2,
         },
