@@ -157,6 +157,8 @@ def randomize_motor_strength(
 
     if not hasattr(env, "_motor_strength"):
         env._motor_strength = torch.ones((env.scene.num_envs, asset.num_joints), device=asset.device)
+    if not hasattr(env, "_motor_offset"):
+        env._motor_offset = torch.zeros((env.scene.num_envs, asset.num_joints), device=asset.device)
 
     sampled_strength = torch.empty((len(env_ids), len(global_joint_ids)), device=asset.device).uniform_(
         strength_distribution_params[0], strength_distribution_params[1]

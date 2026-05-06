@@ -99,7 +99,8 @@ def terrain_friction_label(env) -> torch.Tensor:
 
     if hasattr(env, "_terrain_friction"):
         return env._terrain_friction
-    raise RuntimeError("terrain_friction_label requires env._terrain_friction from material randomization")
+    friction = env.scene.terrain.cfg.physics_material.static_friction
+    return torch.full((env.num_envs, 1), friction, device=env.device)
 
 
 def base_com_shift_xy(env, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")) -> torch.Tensor:
@@ -135,15 +136,12 @@ def actuator_params_26(env, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"))
         kp = asset.data.default_joint_stiffness[:, asset_cfg.joint_ids].mean(dim=1, keepdim=True)
         kd = asset.data.default_joint_damping[:, asset_cfg.joint_ids].mean(dim=1, keepdim=True)
 
-    if hasattr(env, "_motor_strength"):
-        motor_strength = env._motor_strength[:, asset_cfg.joint_ids]
-    else:
-        effort = asset.data.joint_effort_limits[:, asset_cfg.joint_ids]
-        motor_strength = effort / effort.mean(dim=1, keepdim=True)
+    if not hasattr(env, "_motor_strength"):
+        env._motor_strength = asset.data.joint_effort_limits.clone()
+    if not hasattr(env, "_motor_offset"):
+        env._motor_offset = torch.zeros_like(env._motor_strength)
 
-    if hasattr(env, "_motor_offset"):
-        motor_offset = env._motor_offset[:, asset_cfg.joint_ids]
-    else:
-        motor_offset = torch.zeros_like(motor_strength)
+    motor_strength = env._motor_strength[:, asset_cfg.joint_ids]
+    motor_offset = env._motor_offset[:, asset_cfg.joint_ids]
 
     return torch.cat((kp, kd, motor_strength, motor_offset), dim=1)
