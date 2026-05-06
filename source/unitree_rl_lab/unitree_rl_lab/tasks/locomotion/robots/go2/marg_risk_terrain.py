@@ -371,7 +371,8 @@ def marg_risk_terrain(
         stone_size = _lerp_from_keyframes(params["stone_size_range"], difficulty)
         max_height = _lerp_from_keyframes(params["height_range"], difficulty)
         stone_x = stone_size
-        stone_y = max(0.20, stone_size * 0.45)
+        # stone_y = max(0.20, stone_size * 0.45)
+        stone_y = stone_size
         pitch = stone_x + gap_size
         x_vals = np.arange(0.7, sx - 0.7, pitch)
         for cx in x_vals:

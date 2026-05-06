@@ -278,19 +278,27 @@ def reset_base_with_terrain_orientation(
 
 
 @configclass
-class TerminationsCfg(BaseTerminationsCfg):
+class TerminationsCfg:
     """Termination terms for the MDP."""
+    
+    time_out = DoneTerm(func=mdp.time_out, time_out=True)
+    base_contact = DoneTerm(
+        func=mdp.illegal_contact,
+        params={"sensor_cfg": SceneEntityCfg("contact_forces", body_names="base"), "threshold": 1.0},
+    )
+    bad_orientation = DoneTerm(func=mdp.bad_orientation, params={"limit_angle": 0.8})
 
     stationary = DoneTerm(
         func=mdp.terminate_stationary_for_duration,
         params={
             "asset_cfg": SceneEntityCfg("robot"),
             "command_name": "base_velocity",
-            "duration": 5.0,
+            "duration": 10.0,
             "distance_threshold": 0.10,
             "command_speed_threshold": 0.05,
         },
     )
+    
     feet_on_base_plane_linear = DoneTerm(
         func=mdp.terminate_feet_on_base_plane_selected_terrains,
         params={

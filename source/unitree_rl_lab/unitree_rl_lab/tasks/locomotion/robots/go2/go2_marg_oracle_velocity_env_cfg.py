@@ -189,6 +189,8 @@ def randomize_motor_strength(
 
     if not hasattr(env, "_motor_strength"):
         env._motor_strength = torch.ones((env.scene.num_envs, asset.num_joints), device=asset.device)
+    if not hasattr(env, "_motor_offset"):
+        env._motor_offset = torch.zeros((env.scene.num_envs, asset.num_joints), device=asset.device)
 
     sampled_strength = torch.empty((len(env_ids), len(global_joint_ids)), device=asset.device).uniform_(
         strength_distribution_params[0], strength_distribution_params[1]
@@ -370,19 +372,8 @@ class ObservationsCfg:
     proprio_obs: ProprioObsCfg = ProprioObsCfg()
 
     @configclass
-    class ProprioHistoryObsCfg(ObsGroup):
+    class ProprioHistoryObsCfg(ProprioObsCfg):
         """5-step proprio history, flattened to 225D."""
-
-        base_ang_vel = ObsTerm(func=mdp.base_ang_vel, scale=0.2, clip=(-100, 100), noise=Unoise(n_min=-0.2, n_max=0.2))
-        projected_gravity = ObsTerm(func=mdp.projected_gravity, clip=(-100, 100), noise=Unoise(n_min=-0.05, n_max=0.05))
-        velocity_commands = ObsTerm(
-            func=mdp.generated_commands, clip=(-100, 100), params={"command_name": "base_velocity"}
-        )
-        joint_pos_rel = ObsTerm(func=mdp.joint_pos_rel, clip=(-100, 100), noise=Unoise(n_min=-0.01, n_max=0.01))
-        joint_vel_rel = ObsTerm(
-            func=mdp.joint_vel_rel, scale=0.05, clip=(-100, 100), noise=Unoise(n_min=-1.5, n_max=1.5)
-        )
-        last_action = ObsTerm(func=mdp.last_action, clip=(-100, 100))
 
         def __post_init__(self):
             self.enable_corruption = True

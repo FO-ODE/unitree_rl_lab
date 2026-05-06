@@ -91,33 +91,6 @@ def feet_stumble(env: ManagerBasedRLEnv, sensor_cfg: SceneEntityCfg) -> torch.Te
     return reward
 
 
-def feet_center(
-    env: ManagerBasedRLEnv,
-    sensor_cfg: SceneEntityCfg,
-    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
-    command_name: str = "base_velocity",
-) -> torch.Tensor:
-    """Penalize stance feet that stay far from the robot-centered support region.
-
-    This uses the feet positions in the base frame and only counts feet that are in contact.
-    The term is scaled by the command magnitude so it matters primarily while the robot is moving.
-    """
-
-    contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
-    asset: Articulation = env.scene[asset_cfg.name]
-
-    contacts = torch.abs(contact_sensor.data.net_forces_w[:, sensor_cfg.body_ids, 2]) > 1.0
-    foot_pos_translated = asset.data.body_pos_w[:, asset_cfg.body_ids, :] - asset.data.root_pos_w[:, None, :]
-    foot_pos_b = torch.zeros_like(foot_pos_translated)
-    for i in range(len(asset_cfg.body_ids)):
-        foot_pos_b[:, i, :] = quat_apply_inverse(asset.data.root_quat_w, foot_pos_translated[:, i, :])
-    foot_center_penalty = torch.sum(torch.sum(torch.square(foot_pos_b), dim=-1) * contacts.float(), dim=1)
-
-    command = env.command_manager.get_command(command_name)
-    command_mag = torch.norm(command[:, :2], dim=1)
-    return foot_center_penalty * command_mag
-
-
 def feet_height_body(
     env: ManagerBasedRLEnv,
     command_name: str,
@@ -250,3 +223,107 @@ def joint_mirror(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg, mirror_joint
         )
     reward *= 1 / len(mirror_joints) if len(mirror_joints) > 0 else 0
     return reward
+
+
+
+
+
+# ============================ MARG Reward  ===============================
+# =========================================================================
+def _query_terrain_height_from_scanner(
+    env: ManagerBasedRLEnv,
+    sample_xy_w: torch.Tensor,
+    height_sensor_cfg: SceneEntityCfg = SceneEntityCfg("height_scanner"),
+) -> torch.Tensor:
+    """Nearest-neighbor terrain height query using the height scanner ray hits.
+
+    Args:
+        sample_xy_w: [num_envs, num_feet, num_samples, 2] world-frame sample XY.
+
+    Returns:
+        terrain_z: [num_envs, num_feet, num_samples] sampled terrain heights.
+    """
+
+    if height_sensor_cfg.name not in env.scene.sensors:
+        return torch.zeros(sample_xy_w.shape[:-1], device=env.device, dtype=sample_xy_w.dtype)
+
+    height_sensor = env.scene.sensors[height_sensor_cfg.name]
+    ray_hits_w = height_sensor.data.ray_hits_w
+    if ray_hits_w is None:
+        return torch.zeros(sample_xy_w.shape[:-1], device=env.device, dtype=sample_xy_w.dtype)
+
+    ray_xy_w = ray_hits_w[..., :2]
+    ray_z_w = ray_hits_w[..., 2]
+
+    num_envs, num_feet, num_samples, _ = sample_xy_w.shape
+    sample_points = sample_xy_w.view(num_envs, num_feet * num_samples, 2)
+
+    # Batched nearest-neighbor lookup from sample points to ray-hit XY points.
+    dists = torch.cdist(sample_points, ray_xy_w)
+    nearest_idx = torch.argmin(dists, dim=-1)
+    terrain_z = torch.gather(ray_z_w, dim=1, index=nearest_idx)
+    return terrain_z.view(num_envs, num_feet, num_samples)
+
+
+def feet_center(
+    env: ManagerBasedRLEnv,
+    sensor_cfg: SceneEntityCfg,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    command_name: str = "base_velocity",
+    d1: float = 0.05,
+    d2: float = 0.0707,
+    edge_height_threshold: float = -0.20,
+    height_sensor_cfg: SceneEntityCfg = SceneEntityCfg("height_scanner"),
+) -> torch.Tensor:
+    """MARG-style foothold edge penalty around each contacted foot.
+
+    Computes 9 sample points around each foot and penalizes feet whose surrounding
+    terrain points indicate a nearby edge or gap.
+    """
+
+    contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
+    asset: Articulation = env.scene[asset_cfg.name]
+
+    # 1) Foot world positions: [E, F, 3]
+    foot_pos_w = asset.data.body_pos_w[:, asset_cfg.body_ids, :]
+
+    # 2) Contact state from net contact forces: [E, F]
+    contact_forces_w = contact_sensor.data.net_forces_w[:, sensor_cfg.body_ids, :]
+    feet_contact = torch.norm(contact_forces_w, dim=-1) > 1.0
+
+    # 3) 9-point sampling pattern around each foot in world XY.
+    offsets_xy = torch.tensor(
+        [
+            [0.0, 0.0],
+            [d1, 0.0],
+            [-d1, 0.0],
+            [0.0, d1],
+            [0.0, -d1],
+            [d1, d1],
+            [d1, -d1],
+            [-d1, d1],
+            [-d1, -d1],
+        ],
+        device=env.device,
+        dtype=foot_pos_w.dtype,
+    )
+    sample_xy_w = foot_pos_w[:, :, None, 0:2] + offsets_xy[None, None, :, :]
+
+    # 4) Query terrain height from scanner: [E, F, 9]
+    terrain_z = _query_terrain_height_from_scanner(env, sample_xy_w, height_sensor_cfg=height_sensor_cfg)
+
+    # 5) Relative heights around each foot.
+    center_z = terrain_z[:, :, 0:1]
+    rel_h = terrain_z - center_z
+
+    # 6) Edge detection on cross and diagonal neighbors.
+    type2_bad = rel_h[:, :, 1:5] < edge_height_threshold
+    type3_bad = rel_h[:, :, 5:9] < edge_height_threshold
+    n2 = type2_bad.any(dim=-1).float()
+    n3 = type3_bad.any(dim=-1).float()
+
+    # 7) Per-foot penalty, then sum over feet.
+    per_foot_penalty = feet_contact.float() * (n2 + 2.0 * n3)
+    penalty = torch.sum(per_foot_penalty, dim=1)
+
+    return penalty

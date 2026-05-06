@@ -13,7 +13,7 @@ def terminate_stationary_for_duration(
     env: ManagerBasedRLEnv,
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
     command_name: str = "base_velocity",
-    duration: float = 5.0,
+    duration: float = 10.0,
     distance_threshold: float = 0.10,
     command_speed_threshold: float = 0.05,
 ) -> torch.Tensor:
