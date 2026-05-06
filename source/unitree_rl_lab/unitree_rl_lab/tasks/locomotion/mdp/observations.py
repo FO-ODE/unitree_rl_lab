@@ -94,14 +94,12 @@ def critical_mass_summary(env, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot
 def terrain_friction_label(env) -> torch.Tensor:
     """1D terrain friction label.
 
-    This uses the configured terrain friction value. It is a stable scaffold until
-    a fully randomized friction ground-truth path is added.
+    This must come from env state populated by the terrain material randomization.
     """
 
     if hasattr(env, "_terrain_friction"):
         return env._terrain_friction
-    friction = env.cfg.scene.terrain.physics_material.static_friction
-    return torch.full((env.num_envs, 1), friction, device=env.device)
+    raise RuntimeError("terrain_friction_label requires env._terrain_friction from material randomization")
 
 
 def base_com_shift_xy(env, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")) -> torch.Tensor:
