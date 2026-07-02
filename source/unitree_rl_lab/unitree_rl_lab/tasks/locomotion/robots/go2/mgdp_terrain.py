@@ -18,6 +18,7 @@ MGDP_GAP_PARKOUR_WEIGHTS = {
     "beams": 0.1,
     "air_beams": 0.1,
     "air_stairs": 0.1,
+    "flat_turn": 0.3,
 }
 
 MGDP_PIT_DEPTH_M = 0.6
@@ -143,6 +144,25 @@ def _fill_pit_with_start_platform(
 ) -> None:
     terrain.height_field_raw[:, :] = -abs(_height_to_units(terrain, depth))
     _clear_start_platform(terrain, platform_size)
+
+
+def _flat_turn_terrain(terrain: _SubTerrain) -> None:
+    terrain.height_field_raw[:, :] = 0
+
+
+def _flat_turn_spawn_origin(terrain: _SubTerrain, clearance: float = 0.08) -> np.ndarray:
+    x = 0.5 * (terrain.width - 1) * terrain.horizontal_scale
+    y = 0.5 * (terrain.length - 1) * terrain.horizontal_scale
+    ix = int(np.clip(round(x / terrain.horizontal_scale), 0, terrain.width - 1))
+    iy = int(np.clip(round(y / terrain.horizontal_scale), 0, terrain.length - 1))
+    z = float(terrain.height_field_raw[ix, iy] * terrain.vertical_scale + clearance)
+    return np.array([x, y, z], dtype=np.float32)
+
+
+def _flat_turn_mesh(terrain: _SubTerrain, thickness: float = 0.05) -> trimesh.Trimesh:
+    sx = (terrain.width - 1) * terrain.horizontal_scale
+    sy = (terrain.length - 1) * terrain.horizontal_scale
+    return _make_box_xy(sx, sy, 0.0, thickness, 0.5 * sx, 0.5 * sy)
 
 
 def _parkour_gap_terrain(
@@ -629,18 +649,23 @@ def mgdp_terrain(difficulty: float, cfg: "MGDPTerrainCfg") -> tuple[list[trimesh
         _stairs_terrain(terrain, difficulty, gap_cfg)
     elif terrain_type in _PIT_ONLY_TERRAINS:
         _fill_pit_with_start_platform(terrain)
+    elif terrain_type == "flat_turn":
+        _flat_turn_terrain(terrain)
     else:
         raise ValueError(f"Unknown MGDP terrain type: {terrain_type}")
 
-    meshes = [
-        _heightfield_to_terraced_trimesh(
-            terrain.height_field_raw,
-            terrain.horizontal_scale,
-            terrain.vertical_scale,
-            outer_wall_edges=getattr(cfg, "outer_wall_edges", (False, False, False, False)),
-            outer_wall_top_z=getattr(cfg, "outer_wall_top_z", 0.0),
-        )
-    ]
+    if terrain_type == "flat_turn":
+        meshes = [_flat_turn_mesh(terrain)]
+    else:
+        meshes = [
+            _heightfield_to_terraced_trimesh(
+                terrain.height_field_raw,
+                terrain.horizontal_scale,
+                terrain.vertical_scale,
+                outer_wall_edges=getattr(cfg, "outer_wall_edges", (False, False, False, False)),
+                outer_wall_top_z=getattr(cfg, "outer_wall_top_z", 0.0),
+            )
+        ]
     if terrain_type == "beams":
         meshes.extend(_beam_meshes(terrain, rng, difficulty, gap_cfg))
     elif terrain_type == "air_beams" and cfg.add_air_beams:
@@ -652,7 +677,11 @@ def mgdp_terrain(difficulty: float, cfg: "MGDPTerrainCfg") -> tuple[list[trimesh
             _air_stairs_meshes(terrain, rng, difficulty, gap_cfg, first_top_z=getattr(cfg, "air_first_top_z", 0.0))
         )
 
-    return meshes, _spawn_origin(terrain)
+    if terrain_type == "flat_turn":
+        origin = _flat_turn_spawn_origin(terrain)
+    else:
+        origin = _spawn_origin(terrain)
+    return meshes, origin
 
 
 def _terrain_type_from_seed(seed: int | None) -> str:
@@ -681,14 +710,17 @@ MGDP_GAP_PARKOUR_TERRAIN_GENERATOR_CFG = TerrainGeneratorCfg(
     size=(10.0, 5.0),
     border_width=20.0,
     num_rows=10,
-    num_cols=10,
+    num_cols=13,
     horizontal_scale=0.05,
     vertical_scale=0.01,
     difficulty_range=(0.0, 1.0),
     curriculum=True,
     use_cache=False,
     sub_terrains={
-        name: MGDPTerrainCfg(proportion=weight, terrain_type=name)
+        name: MGDPTerrainCfg(
+            proportion=weight,
+            terrain_type=name,
+        )
         for name, weight in MGDP_GAP_PARKOUR_WEIGHTS.items()
     },
 )

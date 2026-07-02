@@ -45,10 +45,65 @@ def _set_mgdp_terrain_seed(terrain_generator_cfg, seed: int) -> None:
 
 
 def _active_subterrain_count(terrain_generator_cfg) -> int:
-    return max(1, sum(float(sub_cfg.proportion) > 0.0 for sub_cfg in terrain_generator_cfg.sub_terrains.values()))
+    proportions = [float(sub_cfg.proportion) for sub_cfg in terrain_generator_cfg.sub_terrains.values()]
+    positive_proportions = [proportion for proportion in proportions if proportion > 0.0]
+    if not positive_proportions:
+        return 1
+    unit_proportion = min(positive_proportions)
+    return max(1, int(round(sum(positive_proportions) / unit_proportion)))
+
+
+def _subterrain_column_indices(terrain_generator_cfg, terrain_name: str) -> list[int]:
+    sub_terrains = terrain_generator_cfg.sub_terrains
+    names = list(sub_terrains.keys())
+    if terrain_name not in names:
+        return []
+
+    proportions = [float(sub_cfg.proportion) for sub_cfg in sub_terrains.values()]
+    total = sum(proportions)
+    if total <= 0.0:
+        return []
+
+    cumulative = []
+    running = 0.0
+    for proportion in proportions:
+        running += proportion / total
+        cumulative.append(running)
+
+    columns = []
+    for col in range(int(terrain_generator_cfg.num_cols)):
+        ratio = col / float(terrain_generator_cfg.num_cols) + 0.001
+        sub_index = next(i for i, value in enumerate(cumulative) if ratio < value)
+        if names[sub_index] == terrain_name:
+            columns.append(col)
+    return columns
+
+
+def assign_flat_turn_envs_to_center_column(env, env_ids, terrain_name: str = "flat_turn") -> None:
+    terrain = env.scene.terrain
+    if terrain.terrain_origins is None or not hasattr(terrain, "terrain_types"):
+        return
+
+    flat_columns = _subterrain_column_indices(env.cfg.scene.terrain.terrain_generator, terrain_name)
+    if len(flat_columns) <= 1:
+        return
+
+    center_column = flat_columns[len(flat_columns) // 2]
+    flat_columns_tensor = torch.tensor(flat_columns, dtype=torch.long, device=env.device)
+    is_flat_turn = torch.isin(terrain.terrain_types, flat_columns_tensor)
+    not_center = terrain.terrain_types != center_column
+    remap_env_ids = torch.nonzero(is_flat_turn & not_center, as_tuple=False).flatten()
+    if remap_env_ids.numel() == 0:
+        return
+
+    terrain.terrain_types[remap_env_ids] = center_column
+    terrain.env_origins[remap_env_ids] = terrain.terrain_origins[terrain.terrain_levels[remap_env_ids], center_column]
 
 
 _set_mgdp_terrain_seed(MGDP_TERRAIN_GENERATOR_CFG, GO2_MARG_ORACLE_RISK_TERRAIN_SEED)
+FEET_ON_BASE_PLANE_TERRAINS = tuple(
+    name for name in MGDP_TERRAIN_GENERATOR_CFG.sub_terrains.keys() if name != "flat_turn"
+)
 
 
 GO2_MARG_ORACLE_SPAWN_CFG = ROBOT_CFG.spawn.replace(asset_path=str(GO2_MODIFIED_URDF_PATH))
@@ -286,6 +341,7 @@ class TerminationsCfg:
         params={
             "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*_foot"),
             "asset_cfg": SceneEntityCfg("robot", body_names=".*_foot"),
+            "restricted_terrain_types": FEET_ON_BASE_PLANE_TERRAINS,
             "force_threshold": 1.0,
             "plane_height_threshold": -0.2,
         },
@@ -299,6 +355,14 @@ class EventCfg:
     """Configuration for events."""
 
     # startup
+    flat_turn_center_column = EventTerm(
+        func=assign_flat_turn_envs_to_center_column,
+        mode="startup",
+        params={
+            "terrain_name": "flat_turn",
+        },
+    )
+
     physics_material = EventTerm(
         func=randomize_rigid_body_material_with_cache,
         mode="startup",
@@ -402,7 +466,7 @@ FORWARD_ONLY_ANG_VEL_Z = (-0.01, 0.01)
 class CommandsCfg:
     """Command specifications for the MDP."""
 
-    base_velocity = mdp.UniformLevelVelocityCommandCfg(
+    base_velocity = mdp.FlatTurnVelocityCommandCfg(
         asset_name="robot",
         resampling_time_range=(10.0, 10.0),
         rel_standing_envs=0.1,
@@ -702,13 +766,13 @@ class RewardsCfg:
     stand_still = RewTerm(
         func=mdp.stand_still,
         weight=-1.0,
-        params={"command_name": "base_velocity", "cmd_threshold": 0.05},
+        params={"command_name": "base_velocity", "cmd_threshold": 0.05, "excluded_terrain_names": ("flat_turn",)},
     )
     a_track_lin_vel_xy = RewTerm(
         func=mdp.track_lin_vel_xy_exp, weight=1.0, params={"command_name": "base_velocity", "std": math.sqrt(0.25)}
     )
     a_track_ang_vel_z = RewTerm(
-        func=mdp.track_ang_vel_z_exp, weight=0.5, params={"command_name": "base_velocity", "std": math.sqrt(0.25)}
+        func=mdp.track_ang_vel_z_exp, weight=0.75, params={"command_name": "base_velocity", "std": math.sqrt(0.25)}
     )
 
     # -- smoothness
@@ -775,7 +839,17 @@ class RewardsCfg:
 class CurriculumCfg:
     """Curriculum terms for the MDP."""
 
-    terrain_levels = CurrTerm(func=mdp.terrain_levels_vel)
+    terrain_levels = CurrTerm(
+        func=mdp.terrain_levels_vel,
+        params={"excluded_terrain_names": ("flat_turn",)},
+    )
+    flat_turn_terrain_levels = CurrTerm(
+        func=mdp.flat_turn_terrain_levels,
+        params={
+            "terrain_names": ("flat_turn",),
+            "reward_term_name": "a_track_ang_vel_z",
+        },
+    )
     lin_vel_cmd_levels = CurrTerm(
         func=mdp.lin_vel_cmd_levels,
         params={

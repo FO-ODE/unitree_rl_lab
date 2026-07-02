@@ -39,13 +39,52 @@ def stand_still(
     env: ManagerBasedRLEnv,
     command_name: str = "base_velocity",
     cmd_threshold: float = 0.1,
+    excluded_terrain_names: tuple[str, ...] = (),
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
 ) -> torch.Tensor:
     asset: Articulation = env.scene[asset_cfg.name]
 
     reward = torch.sum(torch.abs(asset.data.joint_pos - asset.data.default_joint_pos), dim=1)
     cmd_norm = torch.norm(env.command_manager.get_command(command_name), dim=1)
-    return reward * (cmd_norm < cmd_threshold)
+    reward *= (cmd_norm < cmd_threshold).float()
+    if excluded_terrain_names:
+        reward *= (~_terrain_name_mask(env, excluded_terrain_names)).float()
+    return reward
+
+
+def _terrain_name_mask(env: ManagerBasedRLEnv, terrain_names: tuple[str, ...]) -> torch.Tensor:
+    terrain = getattr(env.scene, "terrain", None)
+    if terrain is None or not hasattr(terrain, "terrain_types"):
+        return torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
+
+    generator_cfg = getattr(getattr(terrain, "cfg", None), "terrain_generator", None)
+    if generator_cfg is None or not getattr(generator_cfg, "sub_terrains", None):
+        return torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
+
+    names = list(generator_cfg.sub_terrains.keys())
+    proportions = [float(sub_cfg.proportion) for sub_cfg in generator_cfg.sub_terrains.values()]
+    total = sum(proportions)
+    if total <= 0.0:
+        return torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
+
+    cumulative = []
+    running = 0.0
+    for proportion in proportions:
+        running += proportion / total
+        cumulative.append(running)
+
+    selected_type_ids = []
+    selected_names = set(terrain_names)
+    for col in range(int(generator_cfg.num_cols)):
+        threshold = col / float(generator_cfg.num_cols) + 0.001
+        sub_index = next(i for i, value in enumerate(cumulative) if threshold < value)
+        if names[sub_index] in selected_names:
+            selected_type_ids.append(col)
+
+    if not selected_type_ids:
+        return torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
+    type_ids = torch.tensor(selected_type_ids, dtype=torch.long, device=env.device)
+    return torch.isin(terrain.terrain_types, type_ids)
 
 
 """
