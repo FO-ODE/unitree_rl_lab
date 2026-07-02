@@ -11,7 +11,7 @@ MGDP_GAP_PARKOUR_WEIGHTS = {
     "single_gap": 0.1,
     "stone_everywhere": 0.1,
     "stones_2rows": 0.1,
-    "stones_2rows_staggered": 0.0,
+    "stones_2rows_staggered": 0.1,
     "stones_1row": 0.1,
     "single_bridge": 0.1,
     "stairs": 0.1,
