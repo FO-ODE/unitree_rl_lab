@@ -27,5 +27,4 @@ FSM:
   Velocity:
     transitions: 
       Passive: LT + B.on_pressed
-    policy_dir: ../../../logs/rsl_rl/unitree_go2_velocity
-    
+    policy_dir: ../../../logs/rsl_rl/go2_marg_oracle_risk_terrain/2026-07-04_17-04-33

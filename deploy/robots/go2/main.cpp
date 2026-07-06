@@ -2,6 +2,7 @@
 #include "FSM/State_Passive.h"
 #include "FSM/State_FixStand.h"
 #include "FSM/State_RLBase.h"
+#include <rclcpp/rclcpp.hpp>
 
 std::unique_ptr<LowCmd_t> FSMState::lowcmd = nullptr;
 std::shared_ptr<LowState_t> FSMState::lowstate = nullptr;
@@ -26,6 +27,8 @@ void init_fsm_state()
 
 int main(int argc, char** argv)
 {
+    rclcpp::init(argc, argv);
+
     // Load parameters
     auto vm = param::helper(argc, argv);
 
@@ -51,4 +54,3 @@ int main(int argc, char** argv)
     
     return 0;
 }
-
