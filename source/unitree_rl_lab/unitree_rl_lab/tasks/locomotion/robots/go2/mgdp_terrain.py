@@ -27,11 +27,11 @@ MGDP_PLATFORM_SIZE_M = 2.0
 _STONE_TERRAIN_KWARGS = {
     "stone_everywhere": {},
     "stones_2rows": dict(
-        two_rows=True, lateral_stone_scale=0.5, lateral_gap_scale=0.5, forward_gap_scale=0.5,
+        two_rows=True, lateral_stone_scale=0.3, lateral_gap_scale=0.5, forward_gap_scale=0.5,
         forward_stone_scale=0.5, height_scale=0.2,
     ),
     "stones_2rows_staggered": dict(
-        two_rows=True, staggered_rows=True, lateral_stone_scale=0.5, lateral_gap_scale=0.5,
+        two_rows=True, staggered_rows=True, lateral_stone_scale=0.3, lateral_gap_scale=0.5,
         forward_gap_scale=0.5, forward_stone_scale=0.5, height_scale=0.2,
     ),
     "stones_1row": dict(one_row=True, height_scale=1.0),
