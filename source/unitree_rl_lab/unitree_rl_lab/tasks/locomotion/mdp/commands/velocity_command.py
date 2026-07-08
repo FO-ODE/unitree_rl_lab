@@ -34,7 +34,12 @@ class FlatTurnVelocityCommand(UniformVelocityCommand):
         max_level = max(1, int(getattr(terrain, "max_terrain_level", 1)) - 1)
         difficulty = torch.clamp(terrain_level / float(max_level), 0.0, 1.0)
 
-        sign = torch.where(
+        lin_y_sign = torch.where(
+            torch.rand(turn_env_ids.numel(), device=self.device) < 0.5,
+            -torch.ones(turn_env_ids.numel(), device=self.device),
+            torch.ones(turn_env_ids.numel(), device=self.device),
+        )
+        ang_sign = torch.where(
             torch.rand(turn_env_ids.numel(), device=self.device) < 0.5,
             -torch.ones(turn_env_ids.numel(), device=self.device),
             torch.ones(turn_env_ids.numel(), device=self.device),
@@ -46,9 +51,22 @@ class FlatTurnVelocityCommand(UniformVelocityCommand):
         )
         ang_abs_range = self._lerp_range(self.cfg.turn_ang_vel_z_start_abs, self.cfg.turn_ang_vel_z_end_abs, difficulty)
 
-        self.vel_command_b[turn_env_ids, 0] = self._sample_range(lin_x_range)
-        self.vel_command_b[turn_env_ids, 1] = sign * self._sample_range(lin_y_abs_range)
-        self.vel_command_b[turn_env_ids, 2] = sign * self._sample_range(ang_abs_range)
+        lin_x = self._sample_range(lin_x_range)
+        lin_y = lin_y_sign * self._sample_range(lin_y_abs_range)
+        ang_z = ang_sign * self._sample_range(ang_abs_range)
+
+        mode = self._sample_flat_locomotion_mode(turn_env_ids.numel())
+        backward_only = mode == 0
+        lateral_only = mode == 1
+        turn_only = mode == 2
+
+        lin_x[lateral_only | turn_only] = 0.0
+        lin_y[backward_only | turn_only] = 0.0
+        ang_z[backward_only | lateral_only] = 0.0
+
+        self.vel_command_b[turn_env_ids, 0] = lin_x
+        self.vel_command_b[turn_env_ids, 1] = lin_y
+        self.vel_command_b[turn_env_ids, 2] = ang_z
         self.is_standing_env[turn_env_ids] = False
 
     def _update_command(self):
@@ -107,6 +125,11 @@ class FlatTurnVelocityCommand(UniformVelocityCommand):
     def _sample_range(self, ranges: torch.Tensor) -> torch.Tensor:
         return ranges[:, 0] + torch.rand(ranges.shape[0], device=self.device) * (ranges[:, 1] - ranges[:, 0])
 
+    def _sample_flat_locomotion_mode(self, num_commands: int) -> torch.Tensor:
+        probabilities = torch.tensor(self.cfg.flat_locomotion_mode_probabilities, device=self.device)
+        probabilities = probabilities / torch.sum(probabilities)
+        return torch.multinomial(probabilities, num_commands, replacement=True)
+
 
 @configclass
 class FlatTurnVelocityCommandCfg(UniformLevelVelocityCommandCfg):
@@ -119,3 +142,5 @@ class FlatTurnVelocityCommandCfg(UniformLevelVelocityCommandCfg):
     turn_lin_vel_y_end_abs: tuple[float, float] = (0.0, 0.03)
     turn_ang_vel_z_start_abs: tuple[float, float] = (0.25, 0.50)
     turn_ang_vel_z_end_abs: tuple[float, float] = (0.8, 1.2)
+    # backward_only, lateral_only, turn_only, mixed
+    flat_locomotion_mode_probabilities: tuple[float, float, float, float] = (0.2, 0.2, 0.2, 0.4)

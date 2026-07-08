@@ -136,10 +136,11 @@ def flat_turn_terrain_levels(
     env_ids: Sequence[int],
     terrain_names: tuple[str, ...] = ("flat_turn",),
     reward_term_name: str = "a_track_ang_vel_z",
+    lin_reward_term_name: str | None = None,
     success_ratio: float = 0.75,
     failure_ratio: float = 0.45,
 ) -> torch.Tensor:
-    """Curriculum for flat turning terrains based on angular-velocity tracking."""
+    """Curriculum for flat locomotion terrains based on velocity tracking."""
     terrain: TerrainImporter = env.scene.terrain
     if terrain.terrain_origins is None:
         return torch.mean(terrain.terrain_levels.float())
@@ -151,8 +152,17 @@ def flat_turn_terrain_levels(
 
     reward_term = env.reward_manager.get_term_cfg(reward_term_name)
     reward = env.reward_manager._episode_sums[reward_term_name][flat_env_ids] / env.max_episode_length_s
-    move_up = reward > reward_term.weight * success_ratio
-    move_down = reward < reward_term.weight * failure_ratio
+    success = reward > reward_term.weight * success_ratio
+    failure = reward < reward_term.weight * failure_ratio
+
+    if lin_reward_term_name is not None:
+        lin_reward_term = env.reward_manager.get_term_cfg(lin_reward_term_name)
+        lin_reward = env.reward_manager._episode_sums[lin_reward_term_name][flat_env_ids] / env.max_episode_length_s
+        success &= lin_reward > lin_reward_term.weight * success_ratio
+        failure |= lin_reward < lin_reward_term.weight * failure_ratio
+
+    move_up = success
+    move_down = failure
     move_down *= ~move_up
     terrain.update_env_origins(flat_env_ids, move_up, move_down)
     return torch.mean(terrain.terrain_levels.float())

@@ -455,11 +455,18 @@ class EventCfg:
 # =========================== Command Space ===============================
 # =========================================================================
 # Exposed command interface for this training task:
-# all terrain columns use the same near-forward-only velocity command.
+# parkour terrains stay near-forward-only, while the center flat_turn column trains flat-ground locomotion.
 FORWARD_ONLY_LIN_VEL_X = (0.1, 1.0)
 FORWARD_ONLY_LIN_VEL_X_LIMIT = (0.1, 1.5)
 FORWARD_ONLY_LIN_VEL_Y = (-0.01, 0.01)
 FORWARD_ONLY_ANG_VEL_Z = (-0.01, 0.01)
+FLAT_LOCOMOTION_LIN_VEL_X_START = (-0.3, 0.6)
+FLAT_LOCOMOTION_LIN_VEL_X_END = (-0.6, 1.0)
+FLAT_LOCOMOTION_LIN_VEL_Y_START_ABS = (0.0, 0.2)
+FLAT_LOCOMOTION_LIN_VEL_Y_END_ABS = (0.0, 0.5)
+FLAT_LOCOMOTION_ANG_VEL_Z_START_ABS = (0.15, 0.5)
+FLAT_LOCOMOTION_ANG_VEL_Z_END_ABS = (0.0, 1.2)
+FLAT_LOCOMOTION_MODE_PROBABILITIES = (0.2, 0.2, 0.2, 0.4)  # backward, lateral, turn, mixed
 
 
 @configclass
@@ -481,6 +488,13 @@ class CommandsCfg:
             lin_vel_y=FORWARD_ONLY_LIN_VEL_Y,
             ang_vel_z=FORWARD_ONLY_ANG_VEL_Z,
         ),
+        turn_lin_vel_x_start=FLAT_LOCOMOTION_LIN_VEL_X_START,
+        turn_lin_vel_x_end=FLAT_LOCOMOTION_LIN_VEL_X_END,
+        turn_lin_vel_y_start_abs=FLAT_LOCOMOTION_LIN_VEL_Y_START_ABS,
+        turn_lin_vel_y_end_abs=FLAT_LOCOMOTION_LIN_VEL_Y_END_ABS,
+        turn_ang_vel_z_start_abs=FLAT_LOCOMOTION_ANG_VEL_Z_START_ABS,
+        turn_ang_vel_z_end_abs=FLAT_LOCOMOTION_ANG_VEL_Z_END_ABS,
+        flat_locomotion_mode_probabilities=FLAT_LOCOMOTION_MODE_PROBABILITIES,
     )
 
 
@@ -848,6 +862,7 @@ class CurriculumCfg:
         params={
             "terrain_names": ("flat_turn",),
             "reward_term_name": "a_track_ang_vel_z",
+            "lin_reward_term_name": "a_track_lin_vel_xy",
         },
     )
     lin_vel_cmd_levels = CurrTerm(
