@@ -53,40 +53,6 @@ parser.add_argument("--follow_camera_yaw", type=float, default=-30.0, help="Foll
 parser.add_argument("--follow_camera_target_x", type=float, default=1.0, help="Look-ahead target offset in robot x axis.")
 parser.add_argument("--follow_camera_target_z", type=float, default=0.35, help="Look-at target height offset.")
 parser.add_argument(
-    "--side_push",
-    action=argparse.BooleanOptionalAction,
-    default=True,
-    help="Apply a periodic lateral push disturbance to the robot base COM during play.",
-)
-parser.add_argument("--no_side_push", dest="side_push", action="store_false", help="Disable the lateral push disturbance.")
-parser.add_argument("--side_push_force", type=float, default=100.0, help="Lateral push force magnitude in Newtons.")
-parser.add_argument("--side_push_duration", type=float, default=0.1, help="Duration of each lateral push in seconds.")
-parser.add_argument("--side_push_period", type=float, default=10.0, help="Period between lateral pushes in seconds.")
-parser.add_argument(
-    "--side_push_start_time",
-    type=float,
-    default=10.0,
-    help="Simulation time of the first lateral push in seconds.",
-)
-parser.add_argument(
-    "--side_push_direction_y",
-    type=float,
-    default=-1.0,
-    help="Push direction along robot base Y. Use -1 for left-to-right in the usual x-forward/y-left base frame.",
-)
-parser.add_argument(
-    "--side_push_arrow_length",
-    type=float,
-    default=0.7,
-    help="Viewport arrow length used to visualize the lateral push.",
-)
-parser.add_argument(
-    "--side_push_arrow_z_offset",
-    type=float,
-    default=0.15,
-    help="Vertical offset from the base COM for the lateral push arrow visualization.",
-)
-parser.add_argument(
     "--jit_policy",
     type=str,
     default=None,
@@ -127,9 +93,6 @@ from rsl_rl.runners import OnPolicyRunner
 import isaaclab_tasks  # noqa: F401
 from isaaclab.devices import Se2Keyboard, Se2KeyboardCfg
 from isaaclab.envs import DirectMARLEnv, multi_agent_to_single_agent
-from isaaclab.markers import VisualizationMarkers
-from isaaclab.markers.config import RED_ARROW_X_MARKER_CFG
-import isaaclab.utils.math as math_utils
 from isaaclab.utils.math import quat_apply_yaw
 from isaaclab.utils.assets import retrieve_file_path
 from isaaclab.utils.dict import print_dict
@@ -148,6 +111,7 @@ _POLICY_HISTORY_FRAMES = 6
 _POLICY_TERRAIN_ROWS = 11
 _POLICY_TERRAIN_COLS = 17
 _POLICY_ACTION_DIM = 12
+_POLICY_ACTION_SCALE = 0.25
 _POLICY_TERM_LAYOUT = (
     ("ang_vel", 3),
     ("gravity", 3),
@@ -239,8 +203,15 @@ class PolicyObsVisualizer:
         self.last_draw_time = 0.0
         plt.ion()
 
-        self.fig, axes = plt.subplots(2, 2, figsize=(14, 8))
-        self.raw_ax, self.history_ax, self.terrain_ax, self.action_ax = axes.ravel()
+        self.fig, axes = plt.subplots(3, 2, figsize=(14, 11))
+        (
+            self.raw_ax,
+            self.history_ax,
+            self.terrain_ax,
+            self.action_ax,
+            self.q_error_ax,
+            self.q_target_ax,
+        ) = axes.ravel()
         self.fig.suptitle("IsaacLab policy observation monitor")
 
         raw_x = np.arange(_POLICY_RAW_DIM)
@@ -276,6 +247,17 @@ class PolicyObsVisualizer:
         self.terrain_ax.set_title("policy_terrain_obs, base_z - terrain_z")
         self.terrain_ax.set_xlabel("x grid index")
         self.terrain_ax.set_ylabel("y grid index")
+        self.terrain_mean_text = self.terrain_ax.text(
+            0.02,
+            0.98,
+            "mean: n/a",
+            transform=self.terrain_ax.transAxes,
+            va="top",
+            ha="left",
+            color="white",
+            fontsize=11,
+            bbox={"facecolor": "black", "alpha": 0.55, "edgecolor": "none", "pad": 3},
+        )
         self.fig.colorbar(self.terrain_img, ax=self.terrain_ax, fraction=0.046, pad=0.04)
 
         action_x = np.arange(_POLICY_ACTION_DIM)
@@ -283,10 +265,31 @@ class PolicyObsVisualizer:
         self.action_ax.set_title("policy action")
         self.action_ax.set_xticks(action_x)
         self.action_ax.set_xticklabels([f"a{i}" for i in action_x], rotation=90, fontsize=8)
+
+        self.joint_labels = [f"j{i}" for i in action_x]
+        self.q_error_bars = self.q_error_ax.bar(action_x, np.zeros(_POLICY_ACTION_DIM))
+        self.q_error_ax.axhline(0.0, color="0.3", linewidth=0.8)
+        self.q_error_ax.set_title("q_target - q")
+        self.q_error_ax.set_xticks(action_x)
+        self.q_error_ax.set_xticklabels(self.joint_labels, rotation=90, fontsize=8)
+        self.q_error_ax.set_ylabel("rad")
+
+        width = 0.4
+        self.q_target_bars = self.q_target_ax.bar(
+            action_x - width / 2.0, np.zeros(_POLICY_ACTION_DIM), width=width, label="q_target"
+        )
+        self.q_actual_bars = self.q_target_ax.bar(
+            action_x + width / 2.0, np.zeros(_POLICY_ACTION_DIM), width=width, label="q"
+        )
+        self.q_target_ax.set_title("q_target and q")
+        self.q_target_ax.set_xticks(action_x)
+        self.q_target_ax.set_xticklabels(self.joint_labels, rotation=90, fontsize=8)
+        self.q_target_ax.set_ylabel("rad")
+        self.q_target_ax.legend(loc="upper right")
         plt.tight_layout()
         plt.show(block=False)
 
-    def update(self, obs_dict: dict[str, torch.Tensor] | None, actions: torch.Tensor | None):
+    def update(self, obs_dict: dict[str, torch.Tensor] | None, actions: torch.Tensor | None, env=None):
         now = time.time()
         if now - self.last_draw_time < self.refresh_dt:
             return
@@ -312,11 +315,31 @@ class PolicyObsVisualizer:
         self.history_img.set_data(history_frames)
         self.history_img.set_clim(-history_abs, history_abs)
 
-        self.terrain_img.set_data(terrain.reshape(_POLICY_TERRAIN_ROWS, _POLICY_TERRAIN_COLS))
+        terrain_grid = terrain.reshape(_POLICY_TERRAIN_ROWS, _POLICY_TERRAIN_COLS)
+        self.terrain_img.set_data(terrain_grid)
+        terrain_mean = self._finite_mean(terrain)
+        self.terrain_mean_text.set_text(
+            f"mean: {terrain_mean:.3f} m" if self.np.isfinite(terrain_mean) else "mean: n/a"
+        )
 
         for bar, value in zip(self.action_bars, action):
             bar.set_height(float(value))
         self._set_symmetric_ylim(self.action_ax, action)
+
+        q_target, q_actual = self._joint_target_and_actual(env, actions)
+        q_error = q_target - q_actual
+        for bar, value in zip(self.q_error_bars, q_error):
+            bar.set_height(float(value))
+        mean_abs = self._finite_mean(self.np.abs(q_error))
+        max_abs = self._finite_max(self.np.abs(q_error))
+        self.q_error_ax.set_title(f"q_target - q, mean_abs={mean_abs:.3f}, max_abs={max_abs:.3f} rad")
+        self._set_symmetric_ylim(self.q_error_ax, q_error, minimum=0.25)
+
+        for bar, value in zip(self.q_target_bars, q_target):
+            bar.set_height(float(value))
+        for bar, value in zip(self.q_actual_bars, q_actual):
+            bar.set_height(float(value))
+        self._set_symmetric_ylim(self.q_target_ax, self.np.concatenate((q_target, q_actual)), minimum=1.0)
 
         self.fig.canvas.draw_idle()
         self.plt.pause(0.001)
@@ -348,6 +371,29 @@ class PolicyObsVisualizer:
             history_offset += _POLICY_HISTORY_FRAMES * term_dim
             raw_offset += term_dim
         return frames
+
+    def _finite_mean(self, values):
+        finite_values = values[self.np.isfinite(values)]
+        if finite_values.size == 0:
+            return float("nan")
+        return float(self.np.mean(finite_values))
+
+    def _finite_max(self, values):
+        finite_values = values[self.np.isfinite(values)]
+        if finite_values.size == 0:
+            return float("nan")
+        return float(self.np.max(finite_values))
+
+    def _joint_target_and_actual(self, env, actions):
+        action = self._first_env(actions, _POLICY_ACTION_DIM)
+        q_actual = self.np.zeros(_POLICY_ACTION_DIM, dtype=self.np.float32)
+        q_default = self.np.zeros(_POLICY_ACTION_DIM, dtype=self.np.float32)
+        if env is not None:
+            robot = env.unwrapped.scene["robot"]
+            q_actual = self._first_env(robot.data.joint_pos, _POLICY_ACTION_DIM)
+            q_default = self._first_env(robot.data.default_joint_pos, _POLICY_ACTION_DIM)
+        q_target = q_default + action * _POLICY_ACTION_SCALE
+        return q_target.astype(self.np.float32), q_actual.astype(self.np.float32)
 
     def _set_symmetric_ylim(self, axis, values, minimum=1.0):
         finite = values[self.np.isfinite(values)]
@@ -454,98 +500,6 @@ def _update_follow_camera(env):
     eye = eye.detach().cpu()
     target = target.detach().cpu()
     set_camera_view(eye=eye.tolist(), target=target.tolist())
-
-
-class PeriodicSidePush:
-    """Apply and visualize a short periodic side push on the robot base COM."""
-
-    def __init__(
-        self,
-        env,
-        force_magnitude: float,
-        duration: float,
-        period: float,
-        start_time: float,
-        direction_y: float,
-        arrow_length: float,
-        arrow_z_offset: float,
-    ):
-        self.robot = env.unwrapped.scene["robot"]
-        self.device = env.unwrapped.device
-        self.force_magnitude = float(force_magnitude)
-        self.duration = max(float(duration), 0.0)
-        self.period = max(float(period), 1.0e-6)
-        self.start_time = max(float(start_time), 0.0)
-        self.direction_y = 1.0 if direction_y >= 0.0 else -1.0
-        self.arrow_length = max(float(arrow_length), 1.0e-3)
-        self.arrow_z_offset = float(arrow_z_offset)
-        body_ids, body_names = self.robot.find_bodies("base", preserve_order=True)
-        if not body_ids:
-            body_ids = [0]
-            body_names = [self.robot.body_names[0]]
-        self.body_ids = body_ids
-        self.force_b = torch.tensor(
-            [[[0.0, self.direction_y * self.force_magnitude, 0.0]]], device=self.device, dtype=torch.float32
-        )
-        self.zero_force = torch.zeros_like(self.force_b)
-        self.zero_torque = torch.zeros_like(self.force_b)
-        marker_cfg = RED_ARROW_X_MARKER_CFG.replace(prim_path="/Visuals/Play/side_push")
-        marker_cfg.markers["arrow"].scale = (self.arrow_length, 0.08, 0.08)
-        self.visualizer = VisualizationMarkers(marker_cfg)
-        self.visualizer.set_visibility(False)
-        self.was_active = False
-        print(
-            f"[INFO]: Side push enabled on body '{body_names[0]}': "
-            f"{self.force_magnitude:.1f} N for {self.duration:.3f} s every {self.period:.1f} s, "
-            f"first at {self.start_time:.1f} s."
-        )
-
-    def update(self, sim_time: float):
-        active = self._is_active(sim_time)
-        force_b = self.force_b if active else self.zero_force
-        self.robot.set_external_force_and_torque(
-            force_b,
-            self.zero_torque,
-            body_ids=self.body_ids,
-            env_ids=[0],
-            is_global=False,
-        )
-        if active:
-            self._show_arrow()
-        elif self.was_active:
-            self.visualizer.set_visibility(False)
-        self.was_active = active
-
-    def clear(self):
-        self.robot.set_external_force_and_torque(
-            self.zero_force,
-            self.zero_torque,
-            body_ids=self.body_ids,
-            env_ids=[0],
-            is_global=False,
-        )
-        self.visualizer.set_visibility(False)
-        self.was_active = False
-
-    def _is_active(self, sim_time: float) -> bool:
-        if self.duration <= 0.0 or sim_time < self.start_time:
-            return False
-        phase = (sim_time - self.start_time) % self.period
-        return phase < self.duration
-
-    def _show_arrow(self):
-        base_quat_w = self.robot.data.root_link_quat_w[:1]
-        force_w = math_utils.quat_apply(base_quat_w, self.force_b[:, 0])
-        heading = torch.atan2(force_w[:, 1], force_w[:, 0])
-        zeros = torch.zeros_like(heading)
-        arrow_quat_w = math_utils.quat_from_euler_xyz(zeros, zeros, heading)
-        arrow_pos_w = self.robot.data.root_com_pos_w[:1].clone()
-        arrow_pos_w[:, 2] += self.arrow_z_offset
-        arrow_scale = torch.tensor(
-            [[self.arrow_length, 0.08, 0.08]], device=self.device, dtype=torch.float32
-        )
-        self.visualizer.set_visibility(True)
-        self.visualizer.visualize(arrow_pos_w, arrow_quat_w, arrow_scale)
 
 
 def main():
@@ -737,23 +691,6 @@ def main():
             policy_obs_visualizer = None
             print(f"[WARNING]: Failed to start policy observation visualizer: {exc}")
 
-    side_push = None
-    if args_cli.side_push:
-        try:
-            side_push = PeriodicSidePush(
-                env,
-                force_magnitude=args_cli.side_push_force,
-                duration=args_cli.side_push_duration,
-                period=args_cli.side_push_period,
-                start_time=args_cli.side_push_start_time,
-                direction_y=args_cli.side_push_direction_y,
-                arrow_length=args_cli.side_push_arrow_length,
-                arrow_z_offset=args_cli.side_push_arrow_z_offset,
-            )
-        except Exception as exc:
-            side_push = None
-            print(f"[WARNING]: Failed to start side push disturbance: {exc}")
-
     # reset environment
     obs = env.get_observations()
     obs_dict = None
@@ -831,9 +768,7 @@ def main():
             # agent stepping
             actions = policy(obs_dict if using_custom_runner or using_jit_policy else obs)
             if policy_obs_visualizer is not None:
-                policy_obs_visualizer.update(obs_dict, actions)
-            if side_push is not None:
-                side_push.update(sim_time)
+                policy_obs_visualizer.update(obs_dict, actions, env)
             # env stepping
             obs, _, _, infos = env.step(actions)
             if using_custom_runner or using_jit_policy or keyboard is not None:
@@ -851,8 +786,6 @@ def main():
             time.sleep(sleep_time)
 
     # close the simulator
-    if side_push is not None:
-        side_push.clear()
     if policy_obs_visualizer is not None:
         policy_obs_visualizer.close()
     env.close()

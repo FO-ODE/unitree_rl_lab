@@ -1,0 +1,646 @@
+--- git status ---
+On branch main
+Your branch is up to date with 'origin/main'.
+
+Changes not staged for commit:
+  (use "git add <file>..." to update what will be committed)
+  (use "git restore <file>..." to discard changes in working directory)
+	modified:   scripts/rsl_rl/export_marg_oracle_jit.py
+	modified:   scripts/rsl_rl/play.py
+	modified:   source/unitree_rl_lab/unitree_rl_lab/tasks/locomotion/robots/go2/go2_marg_oracle_risk_terrain_env_cfg.py
+	modified:   source/unitree_rl_lab/unitree_rl_lab/tasks/locomotion/robots/go2/mgdp_terrain.py
+	modified:   source/unitree_rl_lab/unitree_rl_lab/tasks/locomotion/robots/go2/velocity_env_cfg.py
+
+Untracked files:
+  (use "git add <file>..." to include in what will be committed)
+	logs/rsl_rl/go2_marg_oracle_risk_terrain/2026-07-08_18-31-12/
+	logs/rsl_rl/go2_marg_oracle_risk_terrain/2026-07-09_17-24-07/
+	logs/rsl_rl/go2_marg_oracle_risk_terrain/2026-07-09_17-27-10/
+	logs/rsl_rl/unitree_go2_velocity/
+	source/unitree_rl_lab/unitree_rl_lab/tasks/locomotion/robots/go2/velocity_env_cfg copy.py
+
+no changes added to commit (use "git add" and/or "git commit -a") 
+
+
+--- git diff ---
+diff --git a/scripts/rsl_rl/export_marg_oracle_jit.py b/scripts/rsl_rl/export_marg_oracle_jit.py
+index e002f2e..64316f5 100644
+--- a/scripts/rsl_rl/export_marg_oracle_jit.py
++++ b/scripts/rsl_rl/export_marg_oracle_jit.py
+@@ -71,7 +71,9 @@ def _import_class(import_path: str):
+ class ActorOnlyWrapper(torch.nn.Module):
+     def __init__(self, policy: torch.nn.Module):
+         super().__init__()
+-        self.policy = policy
++        self.elevation_net = policy.elevation_net
++        self.estimator_net = policy.estimator_net
++        self.actor = policy.actor
+ 
+     def forward(
+         self,
+@@ -79,13 +81,13 @@ class ActorOnlyWrapper(torch.nn.Module):
+         policy_history_obs: torch.Tensor,
+         policy_terrain_obs: torch.Tensor,
+     ) -> torch.Tensor:
+-        return self.policy.act_inference(
+-            {
+-                "policy_raw_obs": policy_raw_obs,
+-                "policy_history_obs": policy_history_obs,
+-                "policy_terrain_obs": policy_terrain_obs,
+-            }
+-        )
++        terrain_feat = self.elevation_net(policy_terrain_obs)
++        est_feat = self.estimator_net(policy_history_obs)
++        return self.actor(torch.cat((policy_raw_obs, terrain_feat, est_feat), dim=-1))
++
++    @torch.jit.export
++    def estimate(self, policy_history_obs: torch.Tensor) -> torch.Tensor:
++        return self.estimator_net(policy_history_obs)
+ 
+ 
+ def _latest_checkpoint(run_dir: Path) -> Path:
+@@ -137,14 +139,19 @@ def main() -> None:
+     terrain = torch.zeros(1, int(policy.terrain_height), dtype=torch.float32)
+ 
+     with torch.no_grad():
+-        traced = torch.jit.trace(wrapper, (raw, history, terrain), strict=True)
+-        traced = torch.jit.freeze(traced)
++        traced = torch.jit.script(wrapper)
++        traced = torch.jit.freeze(traced, preserved_attrs=["estimate"])
+         torch_out = wrapper(raw, history, terrain)
+         jit_out = traced(raw, history, terrain)
++        torch_est = wrapper.estimate(history)
++        jit_est = traced.estimate(history)
+ 
+     max_error = (torch_out - jit_out).abs().max().item()
+     if max_error > 1.0e-5:
+         raise RuntimeError(f"TorchScript parity check failed: max abs error {max_error}")
++    estimate_max_error = (torch_est - jit_est).abs().max().item()
++    if estimate_max_error > 1.0e-5:
++        raise RuntimeError(f"TorchScript estimator parity check failed: max abs error {estimate_max_error}")
+ 
+     traced.save(str(output))
+     rel_output = os.path.relpath(output, repo_root)
+@@ -152,7 +159,9 @@ def main() -> None:
+     print(f"[INFO] Exported actor-only TorchScript policy: {rel_output}")
+     print(f"[INFO] Source checkpoint: {rel_checkpoint}")
+     print(f"[INFO] Inputs: policy_raw_obs[1,45], policy_history_obs[1,270], policy_terrain_obs[1,187]")
++    print(f"[INFO] Extra method: estimate(policy_history_obs[1,270]) -> estimator[1,7]")
+     print(f"[INFO] Max TorchScript parity error: {max_error:.3g}")
++    print(f"[INFO] Max TorchScript estimator parity error: {estimate_max_error:.3g}")
+ 
+ 
+ if __name__ == "__main__":
+diff --git a/scripts/rsl_rl/play.py b/scripts/rsl_rl/play.py
+index 50fe850..a41443b 100644
+--- a/scripts/rsl_rl/play.py
++++ b/scripts/rsl_rl/play.py
+@@ -52,40 +52,6 @@ parser.add_argument("--follow_camera_height", type=float, default=1.4, help="Fol
+ parser.add_argument("--follow_camera_yaw", type=float, default=-30.0, help="Follow camera yaw offset in degrees.")
+ parser.add_argument("--follow_camera_target_x", type=float, default=1.0, help="Look-ahead target offset in robot x axis.")
+ parser.add_argument("--follow_camera_target_z", type=float, default=0.35, help="Look-at target height offset.")
+-parser.add_argument(
+-    "--side_push",
+-    action=argparse.BooleanOptionalAction,
+-    default=True,
+-    help="Apply a periodic lateral push disturbance to the robot base COM during play.",
+-)
+-parser.add_argument("--no_side_push", dest="side_push", action="store_false", help="Disable the lateral push disturbance.")
+-parser.add_argument("--side_push_force", type=float, default=100.0, help="Lateral push force magnitude in Newtons.")
+-parser.add_argument("--side_push_duration", type=float, default=0.1, help="Duration of each lateral push in seconds.")
+-parser.add_argument("--side_push_period", type=float, default=10.0, help="Period between lateral pushes in seconds.")
+-parser.add_argument(
+-    "--side_push_start_time",
+-    type=float,
+-    default=10.0,
+-    help="Simulation time of the first lateral push in seconds.",
+-)
+-parser.add_argument(
+-    "--side_push_direction_y",
+-    type=float,
+-    default=-1.0,
+-    help="Push direction along robot base Y. Use -1 for left-to-right in the usual x-forward/y-left base frame.",
+-)
+-parser.add_argument(
+-    "--side_push_arrow_length",
+-    type=float,
+-    default=0.7,
+-    help="Viewport arrow length used to visualize the lateral push.",
+-)
+-parser.add_argument(
+-    "--side_push_arrow_z_offset",
+-    type=float,
+-    default=0.15,
+-    help="Vertical offset from the base COM for the lateral push arrow visualization.",
+-)
+ parser.add_argument(
+     "--jit_policy",
+     type=str,
+@@ -127,9 +93,6 @@ from rsl_rl.runners import OnPolicyRunner
+ import isaaclab_tasks  # noqa: F401
+ from isaaclab.devices import Se2Keyboard, Se2KeyboardCfg
+ from isaaclab.envs import DirectMARLEnv, multi_agent_to_single_agent
+-from isaaclab.markers import VisualizationMarkers
+-from isaaclab.markers.config import RED_ARROW_X_MARKER_CFG
+-import isaaclab.utils.math as math_utils
+ from isaaclab.utils.math import quat_apply_yaw
+ from isaaclab.utils.assets import retrieve_file_path
+ from isaaclab.utils.dict import print_dict
+@@ -148,6 +111,7 @@ _POLICY_HISTORY_FRAMES = 6
+ _POLICY_TERRAIN_ROWS = 11
+ _POLICY_TERRAIN_COLS = 17
+ _POLICY_ACTION_DIM = 12
++_POLICY_ACTION_SCALE = 0.25
+ _POLICY_TERM_LAYOUT = (
+     ("ang_vel", 3),
+     ("gravity", 3),
+@@ -239,8 +203,15 @@ class PolicyObsVisualizer:
+         self.last_draw_time = 0.0
+         plt.ion()
+ 
+-        self.fig, axes = plt.subplots(2, 2, figsize=(14, 8))
+-        self.raw_ax, self.history_ax, self.terrain_ax, self.action_ax = axes.ravel()
++        self.fig, axes = plt.subplots(3, 2, figsize=(14, 11))
++        (
++            self.raw_ax,
++            self.history_ax,
++            self.terrain_ax,
++            self.action_ax,
++            self.q_error_ax,
++            self.q_target_ax,
++        ) = axes.ravel()
+         self.fig.suptitle("IsaacLab policy observation monitor")
+ 
+         raw_x = np.arange(_POLICY_RAW_DIM)
+@@ -276,6 +247,17 @@ class PolicyObsVisualizer:
+         self.terrain_ax.set_title("policy_terrain_obs, base_z - terrain_z")
+         self.terrain_ax.set_xlabel("x grid index")
+         self.terrain_ax.set_ylabel("y grid index")
++        self.terrain_mean_text = self.terrain_ax.text(
++            0.02,
++            0.98,
++            "mean: n/a",
++            transform=self.terrain_ax.transAxes,
++            va="top",
++            ha="left",
++            color="white",
++            fontsize=11,
++            bbox={"facecolor": "black", "alpha": 0.55, "edgecolor": "none", "pad": 3},
++        )
+         self.fig.colorbar(self.terrain_img, ax=self.terrain_ax, fraction=0.046, pad=0.04)
+ 
+         action_x = np.arange(_POLICY_ACTION_DIM)
+@@ -283,10 +265,31 @@ class PolicyObsVisualizer:
+         self.action_ax.set_title("policy action")
+         self.action_ax.set_xticks(action_x)
+         self.action_ax.set_xticklabels([f"a{i}" for i in action_x], rotation=90, fontsize=8)
++
++        self.joint_labels = [f"j{i}" for i in action_x]
++        self.q_error_bars = self.q_error_ax.bar(action_x, np.zeros(_POLICY_ACTION_DIM))
++        self.q_error_ax.axhline(0.0, color="0.3", linewidth=0.8)
++        self.q_error_ax.set_title("q_target - q")
++        self.q_error_ax.set_xticks(action_x)
++        self.q_error_ax.set_xticklabels(self.joint_labels, rotation=90, fontsize=8)
++        self.q_error_ax.set_ylabel("rad")
++
++        width = 0.4
++        self.q_target_bars = self.q_target_ax.bar(
++            action_x - width / 2.0, np.zeros(_POLICY_ACTION_DIM), width=width, label="q_target"
++        )
++        self.q_actual_bars = self.q_target_ax.bar(
++            action_x + width / 2.0, np.zeros(_POLICY_ACTION_DIM), width=width, label="q"
++        )
++        self.q_target_ax.set_title("q_target and q")
++        self.q_target_ax.set_xticks(action_x)
++        self.q_target_ax.set_xticklabels(self.joint_labels, rotation=90, fontsize=8)
++        self.q_target_ax.set_ylabel("rad")
++        self.q_target_ax.legend(loc="upper right")
+         plt.tight_layout()
+         plt.show(block=False)
+ 
+-    def update(self, obs_dict: dict[str, torch.Tensor] | None, actions: torch.Tensor | None):
++    def update(self, obs_dict: dict[str, torch.Tensor] | None, actions: torch.Tensor | None, env=None):
+         now = time.time()
+         if now - self.last_draw_time < self.refresh_dt:
+             return
+@@ -312,12 +315,32 @@ class PolicyObsVisualizer:
+         self.history_img.set_data(history_frames)
+         self.history_img.set_clim(-history_abs, history_abs)
+ 
+-        self.terrain_img.set_data(terrain.reshape(_POLICY_TERRAIN_ROWS, _POLICY_TERRAIN_COLS))
++        terrain_grid = terrain.reshape(_POLICY_TERRAIN_ROWS, _POLICY_TERRAIN_COLS)
++        self.terrain_img.set_data(terrain_grid)
++        terrain_mean = self._finite_mean(terrain)
++        self.terrain_mean_text.set_text(
++            f"mean: {terrain_mean:.3f} m" if self.np.isfinite(terrain_mean) else "mean: n/a"
++        )
+ 
+         for bar, value in zip(self.action_bars, action):
+             bar.set_height(float(value))
+         self._set_symmetric_ylim(self.action_ax, action)
+ 
++        q_target, q_actual = self._joint_target_and_actual(env, actions)
++        q_error = q_target - q_actual
++        for bar, value in zip(self.q_error_bars, q_error):
++            bar.set_height(float(value))
++        mean_abs = self._finite_mean(self.np.abs(q_error))
++        max_abs = self._finite_max(self.np.abs(q_error))
++        self.q_error_ax.set_title(f"q_target - q, mean_abs={mean_abs:.3f}, max_abs={max_abs:.3f} rad")
++        self._set_symmetric_ylim(self.q_error_ax, q_error, minimum=0.25)
++
++        for bar, value in zip(self.q_target_bars, q_target):
++            bar.set_height(float(value))
++        for bar, value in zip(self.q_actual_bars, q_actual):
++            bar.set_height(float(value))
++        self._set_symmetric_ylim(self.q_target_ax, self.np.concatenate((q_target, q_actual)), minimum=1.0)
++
+         self.fig.canvas.draw_idle()
+         self.plt.pause(0.001)
+ 
+@@ -349,6 +372,29 @@ class PolicyObsVisualizer:
+             raw_offset += term_dim
+         return frames
+ 
++    def _finite_mean(self, values):
++        finite_values = values[self.np.isfinite(values)]
++        if finite_values.size == 0:
++            return float("nan")
++        return float(self.np.mean(finite_values))
++
++    def _finite_max(self, values):
++        finite_values = values[self.np.isfinite(values)]
++        if finite_values.size == 0:
++            return float("nan")
++        return float(self.np.max(finite_values))
++
++    def _joint_target_and_actual(self, env, actions):
++        action = self._first_env(actions, _POLICY_ACTION_DIM)
++        q_actual = self.np.zeros(_POLICY_ACTION_DIM, dtype=self.np.float32)
++        q_default = self.np.zeros(_POLICY_ACTION_DIM, dtype=self.np.float32)
++        if env is not None:
++            robot = env.unwrapped.scene["robot"]
++            q_actual = self._first_env(robot.data.joint_pos, _POLICY_ACTION_DIM)
++            q_default = self._first_env(robot.data.default_joint_pos, _POLICY_ACTION_DIM)
++        q_target = q_default + action * _POLICY_ACTION_SCALE
++        return q_target.astype(self.np.float32), q_actual.astype(self.np.float32)
++
+     def _set_symmetric_ylim(self, axis, values, minimum=1.0):
+         finite = values[self.np.isfinite(values)]
+         limit = minimum if finite.size == 0 else max(minimum, float(self.np.max(self.np.abs(finite))) * 1.1)
+@@ -456,98 +502,6 @@ def _update_follow_camera(env):
+     set_camera_view(eye=eye.tolist(), target=target.tolist())
+ 
+ 
+-class PeriodicSidePush:
+-    """Apply and visualize a short periodic side push on the robot base COM."""
+-
+-    def __init__(
+-        self,
+-        env,
+-        force_magnitude: float,
+-        duration: float,
+-        period: float,
+-        start_time: float,
+-        direction_y: float,
+-        arrow_length: float,
+-        arrow_z_offset: float,
+-    ):
+-        self.robot = env.unwrapped.scene["robot"]
+-        self.device = env.unwrapped.device
+-        self.force_magnitude = float(force_magnitude)
+-        self.duration = max(float(duration), 0.0)
+-        self.period = max(float(period), 1.0e-6)
+-        self.start_time = max(float(start_time), 0.0)
+-        self.direction_y = 1.0 if direction_y >= 0.0 else -1.0
+-        self.arrow_length = max(float(arrow_length), 1.0e-3)
+-        self.arrow_z_offset = float(arrow_z_offset)
+-        body_ids, body_names = self.robot.find_bodies("base", preserve_order=True)
+-        if not body_ids:
+-            body_ids = [0]
+-            body_names = [self.robot.body_names[0]]
+-        self.body_ids = body_ids
+-        self.force_b = torch.tensor(
+-            [[[0.0, self.direction_y * self.force_magnitude, 0.0]]], device=self.device, dtype=torch.float32
+-        )
+-        self.zero_force = torch.zeros_like(self.force_b)
+-        self.zero_torque = torch.zeros_like(self.force_b)
+-        marker_cfg = RED_ARROW_X_MARKER_CFG.replace(prim_path="/Visuals/Play/side_push")
+-        marker_cfg.markers["arrow"].scale = (self.arrow_length, 0.08, 0.08)
+-        self.visualizer = VisualizationMarkers(marker_cfg)
+-        self.visualizer.set_visibility(False)
+-        self.was_active = False
+-        print(
+-            f"[INFO]: Side push enabled on body '{body_names[0]}': "
+-            f"{self.force_magnitude:.1f} N for {self.duration:.3f} s every {self.period:.1f} s, "
+-            f"first at {self.start_time:.1f} s."
+-        )
+-
+-    def update(self, sim_time: float):
+-        active = self._is_active(sim_time)
+-        force_b = self.force_b if active else self.zero_force
+-        self.robot.set_external_force_and_torque(
+-            force_b,
+-            self.zero_torque,
+-            body_ids=self.body_ids,
+-            env_ids=[0],
+-            is_global=False,
+-        )
+-        if active:
+-            self._show_arrow()
+-        elif self.was_active:
+-            self.visualizer.set_visibility(False)
+-        self.was_active = active
+-
+-    def clear(self):
+-        self.robot.set_external_force_and_torque(
+-            self.zero_force,
+-            self.zero_torque,
+-            body_ids=self.body_ids,
+-            env_ids=[0],
+-            is_global=False,
+-        )
+-        self.visualizer.set_visibility(False)
+-        self.was_active = False
+-
+-    def _is_active(self, sim_time: float) -> bool:
+-        if self.duration <= 0.0 or sim_time < self.start_time:
+-            return False
+-        phase = (sim_time - self.start_time) % self.period
+-        return phase < self.duration
+-
+-    def _show_arrow(self):
+-        base_quat_w = self.robot.data.root_link_quat_w[:1]
+-        force_w = math_utils.quat_apply(base_quat_w, self.force_b[:, 0])
+-        heading = torch.atan2(force_w[:, 1], force_w[:, 0])
+-        zeros = torch.zeros_like(heading)
+-        arrow_quat_w = math_utils.quat_from_euler_xyz(zeros, zeros, heading)
+-        arrow_pos_w = self.robot.data.root_com_pos_w[:1].clone()
+-        arrow_pos_w[:, 2] += self.arrow_z_offset
+-        arrow_scale = torch.tensor(
+-            [[self.arrow_length, 0.08, 0.08]], device=self.device, dtype=torch.float32
+-        )
+-        self.visualizer.set_visibility(True)
+-        self.visualizer.visualize(arrow_pos_w, arrow_quat_w, arrow_scale)
+-
+-
+ def main():
+     """Play with RSL-RL agent."""
+     # parse configuration
+@@ -737,23 +691,6 @@ def main():
+             policy_obs_visualizer = None
+             print(f"[WARNING]: Failed to start policy observation visualizer: {exc}")
+ 
+-    side_push = None
+-    if args_cli.side_push:
+-        try:
+-            side_push = PeriodicSidePush(
+-                env,
+-                force_magnitude=args_cli.side_push_force,
+-                duration=args_cli.side_push_duration,
+-                period=args_cli.side_push_period,
+-                start_time=args_cli.side_push_start_time,
+-                direction_y=args_cli.side_push_direction_y,
+-                arrow_length=args_cli.side_push_arrow_length,
+-                arrow_z_offset=args_cli.side_push_arrow_z_offset,
+-            )
+-        except Exception as exc:
+-            side_push = None
+-            print(f"[WARNING]: Failed to start side push disturbance: {exc}")
+-
+     # reset environment
+     obs = env.get_observations()
+     obs_dict = None
+@@ -831,9 +768,7 @@ def main():
+             # agent stepping
+             actions = policy(obs_dict if using_custom_runner or using_jit_policy else obs)
+             if policy_obs_visualizer is not None:
+-                policy_obs_visualizer.update(obs_dict, actions)
+-            if side_push is not None:
+-                side_push.update(sim_time)
++                policy_obs_visualizer.update(obs_dict, actions, env)
+             # env stepping
+             obs, _, _, infos = env.step(actions)
+             if using_custom_runner or using_jit_policy or keyboard is not None:
+@@ -851,8 +786,6 @@ def main():
+             time.sleep(sleep_time)
+ 
+     # close the simulator
+-    if side_push is not None:
+-        side_push.clear()
+     if policy_obs_visualizer is not None:
+         policy_obs_visualizer.close()
+     env.close()
+diff --git a/source/unitree_rl_lab/unitree_rl_lab/tasks/locomotion/robots/go2/go2_marg_oracle_risk_terrain_env_cfg.py b/source/unitree_rl_lab/unitree_rl_lab/tasks/locomotion/robots/go2/go2_marg_oracle_risk_terrain_env_cfg.py
+index 3962e09..b741149 100644
+--- a/source/unitree_rl_lab/unitree_rl_lab/tasks/locomotion/robots/go2/go2_marg_oracle_risk_terrain_env_cfg.py
++++ b/source/unitree_rl_lab/unitree_rl_lab/tasks/locomotion/robots/go2/go2_marg_oracle_risk_terrain_env_cfg.py
+@@ -132,7 +132,7 @@ GO2_MARG_ORACLE_ROBOT_CFG = ROBOT_CFG.replace(
+ class RobotSceneCfg(InteractiveSceneCfg):
+     """Scene config for the Go2 Marg-Oracle Risk Terrain task."""
+ 
+-    num_envs: int = 4096
++    num_envs: int = 50
+     env_spacing: float = 2.5
+ 
+     terrain = TerrainImporterCfg(
+@@ -381,7 +381,7 @@ class EventCfg:
+         mode="startup",
+         params={
+             "asset_cfg": SceneEntityCfg("robot", body_names="base"),
+-            "mass_distribution_params": (0.0, 1.5),
++            "mass_distribution_params": (-1.0, 2.0),
+             "operation": "add",
+         },
+     )
+@@ -391,8 +391,8 @@ class EventCfg:
+         mode="startup",
+         params={
+             "asset_cfg": SceneEntityCfg("robot", joint_names=".*"),
+-            "stiffness_distribution_params": (0.8, 1.2),
+-            "damping_distribution_params": (0.8, 1.2),
++            "stiffness_distribution_params": (0.9, 1.1),
++            "damping_distribution_params": (0.9, 1.1),
+             "operation": "scale",
+         },
+     )
+@@ -402,7 +402,7 @@ class EventCfg:
+         mode="startup",
+         params={
+             "asset_cfg": SceneEntityCfg("robot", body_names="base"),
+-            "com_range": {"x": (-0.03, 0.03), "y": (-0.015, 0.015), "z": (-0.01, 0.02)},
++            "com_range": {"x": (-0.05, 0.05), "y": (-0.05, 0.05), "z": (-0.05, 0.05)},
+         },
+     )
+ 
+@@ -411,7 +411,7 @@ class EventCfg:
+         mode="startup",
+         params={
+             "asset_cfg": SceneEntityCfg("robot", joint_names=".*"),
+-            "strength_distribution_params": (0.8, 1.2),
++            "strength_distribution_params": (0.9, 1.1),
+         },
+     )
+ 
+@@ -947,7 +947,7 @@ class RobotPlayEnvCfg(RobotEnvCfg):
+ 
+     def __post_init__(self):
+         super().__post_init__()
+-        self.scene.num_envs = 256
++        self.scene.num_envs = 20
+         play_terrain_type, terrain_generator_cfg = _play_terrain_generator_cfg(self.play_terrain_type)
+         self.scene.terrain.terrain_generator = terrain_generator_cfg
+         if play_terrain_type == "test":
+@@ -955,6 +955,7 @@ class RobotPlayEnvCfg(RobotEnvCfg):
+             self.scene.terrain.terrain_generator.num_rows = 3
+         self.scene.terrain.terrain_generator.num_cols = _active_subterrain_count(self.scene.terrain.terrain_generator)
+         self.commands.base_velocity.ranges = deepcopy(self.commands.base_velocity.limit_ranges)
++        self.observations.policy_terrain_obs.enable_corruption = False
+         self.events.push_robot = None
+         # self.terminations.feet_on_base_plane_linear = None
+         self.rewards.feet_center.params["debug_vis"] = True
+diff --git a/source/unitree_rl_lab/unitree_rl_lab/tasks/locomotion/robots/go2/mgdp_terrain.py b/source/unitree_rl_lab/unitree_rl_lab/tasks/locomotion/robots/go2/mgdp_terrain.py
+index c0b7bfd..5f25614 100644
+--- a/source/unitree_rl_lab/unitree_rl_lab/tasks/locomotion/robots/go2/mgdp_terrain.py
++++ b/source/unitree_rl_lab/unitree_rl_lab/tasks/locomotion/robots/go2/mgdp_terrain.py
+@@ -8,17 +8,17 @@ from isaaclab.utils import configclass
+ 
+ 
+ MGDP_GAP_PARKOUR_WEIGHTS = {
+-    "single_gap": 0.1,
+-    "stone_everywhere": 0.1,
+-    "stones_2rows": 0.1,
+-    "stones_2rows_staggered": 0.1,
+-    "stones_1row": 0.1,
+-    "single_bridge": 0.1,
+-    "stairs": 0.1,
+-    "beams": 0.1,
+-    "air_beams": 0.1,
+-    "air_stairs": 0.1,
+-    "flat_turn": 0.3,
++    "single_gap": 0.0,
++    "stone_everywhere": 0.0,
++    "stones_2rows": 0.0,
++    "stones_2rows_staggered": 0.0,
++    "stones_1row": 0.0,
++    "single_bridge": 0.0,
++    "stairs": 0.0,
++    "beams": 0.0,
++    "air_beams": 0.0,
++    "air_stairs": 0.0,
++    "flat_turn": 0.5,
+ }
+ 
+ MGDP_PIT_DEPTH_M = 0.6
+diff --git a/source/unitree_rl_lab/unitree_rl_lab/tasks/locomotion/robots/go2/velocity_env_cfg.py b/source/unitree_rl_lab/unitree_rl_lab/tasks/locomotion/robots/go2/velocity_env_cfg.py
+index f28c337..f566a02 100644
+--- a/source/unitree_rl_lab/unitree_rl_lab/tasks/locomotion/robots/go2/velocity_env_cfg.py
++++ b/source/unitree_rl_lab/unitree_rl_lab/tasks/locomotion/robots/go2/velocity_env_cfg.py
+@@ -33,34 +33,34 @@ COBBLESTONE_ROAD_CFG = terrain_gen.TerrainGeneratorCfg(
+     use_cache=False,
+     sub_terrains={
+         "flat": terrain_gen.MeshPlaneTerrainCfg(proportion=0.1),
+-        "random_rough": terrain_gen.HfRandomUniformTerrainCfg(
+-            proportion=0.1, noise_range=(0.01, 0.06), noise_step=0.01, border_width=0.25
+-        ),
+-        "hf_pyramid_slope": terrain_gen.HfPyramidSlopedTerrainCfg(
+-            proportion=0.1, slope_range=(0.0, 0.4), platform_width=2.0, border_width=0.25
+-        ),
+-        "hf_pyramid_slope_inv": terrain_gen.HfInvertedPyramidSlopedTerrainCfg(
+-            proportion=0.1, slope_range=(0.0, 0.4), platform_width=2.0, border_width=0.25
+-        ),
+-        "boxes": terrain_gen.MeshRandomGridTerrainCfg(
+-            proportion=0.2, grid_width=0.45, grid_height_range=(0.05, 0.2), platform_width=2.0
+-        ),
+-        "pyramid_stairs": terrain_gen.MeshPyramidStairsTerrainCfg(
+-            proportion=0.2,
+-            step_height_range=(0.05, 0.23),
+-            step_width=0.3,
+-            platform_width=3.0,
+-            border_width=1.0,
+-            holes=False,
+-        ),
+-        "pyramid_stairs_inv": terrain_gen.MeshInvertedPyramidStairsTerrainCfg(
+-            proportion=0.2,
+-            step_height_range=(0.05, 0.23),
+-            step_width=0.3,
+-            platform_width=3.0,
+-            border_width=1.0,
+-            holes=False,
+-        ),
++        # "random_rough": terrain_gen.HfRandomUniformTerrainCfg(
++        #     proportion=0.1, noise_range=(0.01, 0.06), noise_step=0.01, border_width=0.25
++        # ),
++        # "hf_pyramid_slope": terrain_gen.HfPyramidSlopedTerrainCfg(
++        #     proportion=0.1, slope_range=(0.0, 0.4), platform_width=2.0, border_width=0.25
++        # ),
++        # "hf_pyramid_slope_inv": terrain_gen.HfInvertedPyramidSlopedTerrainCfg(
++        #     proportion=0.1, slope_range=(0.0, 0.4), platform_width=2.0, border_width=0.25
++        # ),
++        # "boxes": terrain_gen.MeshRandomGridTerrainCfg(
++        #     proportion=0.2, grid_width=0.45, grid_height_range=(0.05, 0.2), platform_width=2.0
++        # ),
++        # "pyramid_stairs": terrain_gen.MeshPyramidStairsTerrainCfg(
++        #     proportion=0.2,
++        #     step_height_range=(0.05, 0.23),
++        #     step_width=0.3,
++        #     platform_width=3.0,
++        #     border_width=1.0,
++        #     holes=False,
++        # ),
++        # "pyramid_stairs_inv": terrain_gen.MeshInvertedPyramidStairsTerrainCfg(
++        #     proportion=0.2,
++        #     step_height_range=(0.05, 0.23),
++        #     step_width=0.3,
++        #     platform_width=3.0,
++        #     border_width=1.0,
++        #     holes=False,
++        # ),
+     },
+ )
+ 
+@@ -194,7 +194,7 @@ class CommandsCfg:
+         rel_standing_envs=0.1,
+         debug_vis=True,
+         ranges=mdp.UniformLevelVelocityCommandCfg.Ranges(
+-            lin_vel_x=(-0.3, 0.5), lin_vel_y=(-0.1, 0.1), ang_vel_z=(-1, 1)
++            lin_vel_x=(-0.1, 0.1), lin_vel_y=(-0.1, 0.1), ang_vel_z=(-1, 1)
+         ),
+         limit_ranges=mdp.UniformLevelVelocityCommandCfg.Ranges(
+             lin_vel_x=(-1.0, 1.0), lin_vel_y=(-0.4, 0.4), ang_vel_z=(-1.0, 1.0)
+@@ -253,10 +253,10 @@ class ObservationsCfg:
+         joint_vel_rel = ObsTerm(func=mdp.joint_vel_rel, scale=0.05, clip=(-100, 100))
+         joint_effort = ObsTerm(func=mdp.joint_effort, scale=0.01, clip=(-100, 100))
+         last_action = ObsTerm(func=mdp.last_action, clip=(-100, 100))
+-        height_scanner = ObsTerm(func=mdp.height_scan,
+-            params={"sensor_cfg": SceneEntityCfg("height_scanner")},
+-            clip=(-1.0, 5.0),
+-        )
++        # height_scanner = ObsTerm(func=mdp.height_scan,
++        #     params={"sensor_cfg": SceneEntityCfg("height_scanner")},
++        #     clip=(-1.0, 5.0),
++        # )
+ 
+         # def __post_init__(self):
+         #     self.history_length = 5
+@@ -368,7 +368,7 @@ class RobotEnvCfg(ManagerBasedRLEnvCfg):
+     """Configuration for the locomotion velocity-tracking environment."""
+ 
+     # Scene settings
+-    scene: RobotSceneCfg = RobotSceneCfg(num_envs=8192, env_spacing=2.5)
++    scene: RobotSceneCfg = RobotSceneCfg(num_envs=4096, env_spacing=2.5)
+     # Basic settings
+     observations: ObservationsCfg = ObservationsCfg()
+     actions: ActionsCfg = ActionsCfg()
+@@ -409,7 +409,7 @@ class RobotEnvCfg(ManagerBasedRLEnvCfg):
+ class RobotPlayEnvCfg(RobotEnvCfg):
+     def __post_init__(self):
+         super().__post_init__()
+-        self.scene.num_envs = 64
+-        self.scene.terrain.terrain_generator.num_rows = 3
+-        self.scene.terrain.terrain_generator.num_cols = 5
+-        self.commands.base_velocity.ranges = self.commands.base_velocity.limit_ranges
++        self.scene.num_envs = 32
++        self.scene.terrain.terrain_generator.num_rows = 2
++        self.scene.terrain.terrain_generator.num_cols = 1
++        self.commands.base_velocity.ranges = self.commands.base_velocity.limit_ranges
+\ No newline at end of file

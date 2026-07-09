@@ -132,7 +132,7 @@ GO2_MARG_ORACLE_ROBOT_CFG = ROBOT_CFG.replace(
 class RobotSceneCfg(InteractiveSceneCfg):
     """Scene config for the Go2 Marg-Oracle Risk Terrain task."""
 
-    num_envs: int = 50
+    num_envs: int = 4096
     env_spacing: float = 2.5
 
     terrain = TerrainImporterCfg(
@@ -381,7 +381,7 @@ class EventCfg:
         mode="startup",
         params={
             "asset_cfg": SceneEntityCfg("robot", body_names="base"),
-            "mass_distribution_params": (-1.0, 2.0),
+            "mass_distribution_params": (0.0, 1.5),
             "operation": "add",
         },
     )
@@ -391,8 +391,8 @@ class EventCfg:
         mode="startup",
         params={
             "asset_cfg": SceneEntityCfg("robot", joint_names=".*"),
-            "stiffness_distribution_params": (0.9, 1.1),
-            "damping_distribution_params": (0.9, 1.1),
+            "stiffness_distribution_params": (0.8, 1.2),
+            "damping_distribution_params": (0.8, 1.2),
             "operation": "scale",
         },
     )
@@ -402,7 +402,7 @@ class EventCfg:
         mode="startup",
         params={
             "asset_cfg": SceneEntityCfg("robot", body_names="base"),
-            "com_range": {"x": (-0.05, 0.05), "y": (-0.05, 0.05), "z": (-0.05, 0.05)},
+            "com_range": {"x": (-0.03, 0.03), "y": (-0.015, 0.015), "z": (-0.01, 0.02)},
         },
     )
 
@@ -411,7 +411,7 @@ class EventCfg:
         mode="startup",
         params={
             "asset_cfg": SceneEntityCfg("robot", joint_names=".*"),
-            "strength_distribution_params": (0.9, 1.1),
+            "strength_distribution_params": (0.8, 1.2),
         },
     )
 
@@ -947,7 +947,7 @@ class RobotPlayEnvCfg(RobotEnvCfg):
 
     def __post_init__(self):
         super().__post_init__()
-        self.scene.num_envs = 20
+        self.scene.num_envs = 256
         play_terrain_type, terrain_generator_cfg = _play_terrain_generator_cfg(self.play_terrain_type)
         self.scene.terrain.terrain_generator = terrain_generator_cfg
         if play_terrain_type == "test":

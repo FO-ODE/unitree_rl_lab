@@ -71,7 +71,9 @@ def _import_class(import_path: str):
 class ActorOnlyWrapper(torch.nn.Module):
     def __init__(self, policy: torch.nn.Module):
         super().__init__()
-        self.policy = policy
+        self.elevation_net = policy.elevation_net
+        self.estimator_net = policy.estimator_net
+        self.actor = policy.actor
 
     def forward(
         self,
@@ -79,13 +81,13 @@ class ActorOnlyWrapper(torch.nn.Module):
         policy_history_obs: torch.Tensor,
         policy_terrain_obs: torch.Tensor,
     ) -> torch.Tensor:
-        return self.policy.act_inference(
-            {
-                "policy_raw_obs": policy_raw_obs,
-                "policy_history_obs": policy_history_obs,
-                "policy_terrain_obs": policy_terrain_obs,
-            }
-        )
+        terrain_feat = self.elevation_net(policy_terrain_obs)
+        est_feat = self.estimator_net(policy_history_obs)
+        return self.actor(torch.cat((policy_raw_obs, terrain_feat, est_feat), dim=-1))
+
+    @torch.jit.export
+    def estimate(self, policy_history_obs: torch.Tensor) -> torch.Tensor:
+        return self.estimator_net(policy_history_obs)
 
 
 def _latest_checkpoint(run_dir: Path) -> Path:
@@ -137,14 +139,19 @@ def main() -> None:
     terrain = torch.zeros(1, int(policy.terrain_height), dtype=torch.float32)
 
     with torch.no_grad():
-        traced = torch.jit.trace(wrapper, (raw, history, terrain), strict=True)
-        traced = torch.jit.freeze(traced)
+        traced = torch.jit.script(wrapper)
+        traced = torch.jit.freeze(traced, preserved_attrs=["estimate"])
         torch_out = wrapper(raw, history, terrain)
         jit_out = traced(raw, history, terrain)
+        torch_est = wrapper.estimate(history)
+        jit_est = traced.estimate(history)
 
     max_error = (torch_out - jit_out).abs().max().item()
     if max_error > 1.0e-5:
         raise RuntimeError(f"TorchScript parity check failed: max abs error {max_error}")
+    estimate_max_error = (torch_est - jit_est).abs().max().item()
+    if estimate_max_error > 1.0e-5:
+        raise RuntimeError(f"TorchScript estimator parity check failed: max abs error {estimate_max_error}")
 
     traced.save(str(output))
     rel_output = os.path.relpath(output, repo_root)
@@ -152,7 +159,9 @@ def main() -> None:
     print(f"[INFO] Exported actor-only TorchScript policy: {rel_output}")
     print(f"[INFO] Source checkpoint: {rel_checkpoint}")
     print(f"[INFO] Inputs: policy_raw_obs[1,45], policy_history_obs[1,270], policy_terrain_obs[1,187]")
+    print(f"[INFO] Extra method: estimate(policy_history_obs[1,270]) -> estimator[1,7]")
     print(f"[INFO] Max TorchScript parity error: {max_error:.3g}")
+    print(f"[INFO] Max TorchScript estimator parity error: {estimate_max_error:.3g}")
 
 
 if __name__ == "__main__":

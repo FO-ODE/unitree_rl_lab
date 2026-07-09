@@ -132,7 +132,7 @@ GO2_MARG_ORACLE_ROBOT_CFG = ROBOT_CFG.replace(
 class RobotSceneCfg(InteractiveSceneCfg):
     """Scene config for the Go2 Marg-Oracle Risk Terrain task."""
 
-    num_envs: int = 50
+    num_envs: int = 4096
     env_spacing: float = 2.5
 
     terrain = TerrainImporterCfg(
@@ -947,7 +947,7 @@ class RobotPlayEnvCfg(RobotEnvCfg):
 
     def __post_init__(self):
         super().__post_init__()
-        self.scene.num_envs = 20
+        self.scene.num_envs = 256
         play_terrain_type, terrain_generator_cfg = _play_terrain_generator_cfg(self.play_terrain_type)
         self.scene.terrain.terrain_generator = terrain_generator_cfg
         if play_terrain_type == "test":
