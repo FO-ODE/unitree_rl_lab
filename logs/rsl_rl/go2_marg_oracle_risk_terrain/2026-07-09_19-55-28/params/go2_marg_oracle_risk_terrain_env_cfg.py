@@ -947,7 +947,7 @@ class RobotPlayEnvCfg(RobotEnvCfg):
 
     def __post_init__(self):
         super().__post_init__()
-        self.scene.num_envs = 256
+        self.scene.num_envs = 20
         play_terrain_type, terrain_generator_cfg = _play_terrain_generator_cfg(self.play_terrain_type)
         self.scene.terrain.terrain_generator = terrain_generator_cfg
         if play_terrain_type == "test":
@@ -956,7 +956,6 @@ class RobotPlayEnvCfg(RobotEnvCfg):
         self.scene.terrain.terrain_generator.num_cols = _active_subterrain_count(self.scene.terrain.terrain_generator)
         self.commands.base_velocity.ranges = deepcopy(self.commands.base_velocity.limit_ranges)
         self.observations.policy_terrain_obs.enable_corruption = False
-        self.observations.policy_raw_obs.enable_corruption = False
         self.events.push_robot = None
         # self.terminations.feet_on_base_plane_linear = None
         self.rewards.feet_center.params["debug_vis"] = True

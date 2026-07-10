@@ -112,6 +112,9 @@ _POLICY_TERRAIN_ROWS = 11
 _POLICY_TERRAIN_COLS = 17
 _POLICY_ACTION_DIM = 12
 _POLICY_ACTION_SCALE = 0.25
+_POLICY_ESTIMATOR_DIM = 7
+_POLICY_ESTIMATOR_VEL_LABELS = ("vx", "vy", "vz")
+_POLICY_ESTIMATOR_CONTACT_LABELS = ("FL", "FR", "RL", "RR")
 _POLICY_TERM_LAYOUT = (
     ("ang_vel", 3),
     ("gravity", 3),
@@ -187,6 +190,13 @@ def _load_marg_oracle_jit_policy(policy_path: str, device: str | torch.device):
 
         return jit_policy(raw_obs, history_obs, terrain_obs)
 
+    def estimate(obs_dict: dict[str, torch.Tensor]) -> torch.Tensor | None:
+        if not hasattr(jit_policy, "estimate"):
+            return None
+        history_obs = obs_dict["policy_history_obs"].to(device=device, dtype=torch.float32)
+        return jit_policy.estimate(history_obs)
+
+    policy.estimate = estimate
     return policy
 
 
@@ -203,12 +213,14 @@ class PolicyObsVisualizer:
         self.last_draw_time = 0.0
         plt.ion()
 
-        self.fig, axes = plt.subplots(3, 2, figsize=(14, 11))
+        self.fig, axes = plt.subplots(4, 2, figsize=(14, 14))
         (
             self.raw_ax,
             self.history_ax,
             self.terrain_ax,
             self.action_ax,
+            self.estimator_vel_ax,
+            self.estimator_contact_ax,
             self.q_error_ax,
             self.q_target_ax,
         ) = axes.ravel()
@@ -266,6 +278,35 @@ class PolicyObsVisualizer:
         self.action_ax.set_xticks(action_x)
         self.action_ax.set_xticklabels([f"a{i}" for i in action_x], rotation=90, fontsize=8)
 
+        estimator_vel_x = np.arange(3)
+        width = 0.36
+        self.estimator_vel_bars = self.estimator_vel_ax.bar(
+            estimator_vel_x - width / 2.0, np.zeros(3), width=width, label="estimator"
+        )
+        self.gt_base_lin_vel_bars = self.estimator_vel_ax.bar(
+            estimator_vel_x + width / 2.0, np.zeros(3), width=width, label="ground truth"
+        )
+        self.estimator_vel_ax.axhline(0.0, color="0.5", linewidth=0.8)
+        self.estimator_vel_ax.set_title("estimator velocity vs IsaacLab ground truth")
+        self.estimator_vel_ax.set_ylabel("m/s")
+        self.estimator_vel_ax.set_xticks(estimator_vel_x)
+        self.estimator_vel_ax.set_xticklabels(_POLICY_ESTIMATOR_VEL_LABELS)
+        self.estimator_vel_ax.legend(loc="upper right", fontsize=8)
+
+        estimator_contact_x = np.arange(4)
+        self.estimator_contact_bars = self.estimator_contact_ax.bar(
+            estimator_contact_x - width / 2.0, np.zeros(4), width=width, label="estimator"
+        )
+        self.gt_foot_contact_bars = self.estimator_contact_ax.bar(
+            estimator_contact_x + width / 2.0, np.zeros(4), width=width, label="ground truth"
+        )
+        self.estimator_contact_ax.set_title("foot contact: estimator vs IsaacLab ground truth")
+        self.estimator_contact_ax.set_ylabel("probability / contact")
+        self.estimator_contact_ax.set_ylim(0.0, 1.0)
+        self.estimator_contact_ax.set_xticks(estimator_contact_x)
+        self.estimator_contact_ax.set_xticklabels(_POLICY_ESTIMATOR_CONTACT_LABELS)
+        self.estimator_contact_ax.legend(loc="upper right", fontsize=8)
+
         self.joint_labels = [f"j{i}" for i in action_x]
         self.q_error_bars = self.q_error_ax.bar(action_x, np.zeros(_POLICY_ACTION_DIM))
         self.q_error_ax.axhline(0.0, color="0.3", linewidth=0.8)
@@ -289,7 +330,7 @@ class PolicyObsVisualizer:
         plt.tight_layout()
         plt.show(block=False)
 
-    def update(self, obs_dict: dict[str, torch.Tensor] | None, actions: torch.Tensor | None, env=None):
+    def update(self, obs_dict: dict[str, torch.Tensor] | None, actions: torch.Tensor | None, env=None, policy=None):
         now = time.time()
         if now - self.last_draw_time < self.refresh_dt:
             return
@@ -325,6 +366,34 @@ class PolicyObsVisualizer:
         for bar, value in zip(self.action_bars, action):
             bar.set_height(float(value))
         self._set_symmetric_ylim(self.action_ax, action)
+
+        estimator = self._policy_estimate(policy, obs_dict)
+        gt_base_lin_vel, gt_foot_contact = self._ground_truth_state(obs_dict, env)
+        estimator_vel = estimator[:3]
+        estimator_contact_prob = self._sigmoid(estimator[3:7])
+        for bar, value in zip(self.estimator_vel_bars, estimator_vel):
+            bar.set_height(float(value))
+        for bar, value in zip(self.gt_base_lin_vel_bars, gt_base_lin_vel):
+            bar.set_height(float(value))
+        estimator_vel_error = estimator_vel - gt_base_lin_vel
+        self._set_symmetric_ylim(
+            self.estimator_vel_ax,
+            self.np.concatenate((estimator_vel, gt_base_lin_vel)),
+            minimum=1.0,
+        )
+        self.estimator_vel_ax.set_title(
+            "estimator velocity vs IsaacLab ground truth   "
+            f"mean_abs_err={self._finite_mean(self.np.abs(estimator_vel_error)):.3f} m/s"
+        )
+        for bar, value in zip(self.estimator_contact_bars, estimator_contact_prob):
+            bar.set_height(float(value))
+        for bar, value in zip(self.gt_foot_contact_bars, gt_foot_contact):
+            bar.set_height(float(value))
+        contact_abs_error = self.np.abs(estimator_contact_prob - gt_foot_contact)
+        self.estimator_contact_ax.set_title(
+            "foot contact: estimator vs IsaacLab ground truth   "
+            f"mean_abs_err={self._finite_mean(contact_abs_error):.3f}"
+        )
 
         q_target, q_actual = self._joint_target_and_actual(env, actions)
         q_error = q_target - q_actual
@@ -383,6 +452,42 @@ class PolicyObsVisualizer:
         if finite_values.size == 0:
             return float("nan")
         return float(self.np.max(finite_values))
+
+    def _sigmoid(self, values):
+        return 1.0 / (1.0 + self.np.exp(-self.np.clip(values, -60.0, 60.0)))
+
+    def _policy_estimate(self, policy, obs_dict):
+        if policy is None or obs_dict is None or not hasattr(policy, "estimate"):
+            return self.np.zeros(_POLICY_ESTIMATOR_DIM, dtype=self.np.float32)
+        try:
+            estimate = policy.estimate(obs_dict)
+        except Exception:
+            return self.np.zeros(_POLICY_ESTIMATOR_DIM, dtype=self.np.float32)
+        return self._first_env(estimate, _POLICY_ESTIMATOR_DIM)
+
+    def _ground_truth_state(self, obs_dict, env):
+        if obs_dict is not None and "privileged_obs" in obs_dict:
+            privileged = self._first_env(obs_dict["privileged_obs"], 42)
+            return privileged[:3], privileged[3:7]
+
+        base_lin_vel = self.np.zeros(3, dtype=self.np.float32)
+        foot_contact = self.np.zeros(4, dtype=self.np.float32)
+        if env is None:
+            return base_lin_vel, foot_contact
+
+        robot = env.unwrapped.scene["robot"]
+        if hasattr(robot.data, "root_lin_vel_b"):
+            base_lin_vel = self._first_env(robot.data.root_lin_vel_b, 3)
+
+        contact_sensor = env.unwrapped.scene.sensors.get("contact_forces")
+        if contact_sensor is not None:
+            try:
+                foot_body_ids, _ = robot.find_bodies(["FL_foot", "FR_foot", "RL_foot", "RR_foot"], preserve_order=True)
+                forces_z = contact_sensor.data.net_forces_w[0, foot_body_ids, 2].detach().cpu().numpy()
+                foot_contact = (self.np.abs(forces_z) > 1.0).astype(self.np.float32)
+            except Exception:
+                pass
+        return base_lin_vel, foot_contact
 
     def _joint_target_and_actual(self, env, actions):
         action = self._first_env(actions, _POLICY_ACTION_DIM)
@@ -581,6 +686,11 @@ def main():
 
         # obtain the trained policy for inference
         policy = runner.get_inference_policy(device=env.unwrapped.device)
+        policy_module = getattr(getattr(runner, "alg", None), "policy", None)
+        if policy_module is None:
+            policy_module = getattr(getattr(runner, "alg", None), "actor_critic", None)
+        if hasattr(policy_module, "estimate"):
+            policy.estimate = policy_module.estimate
 
     if using_jit_policy:
         print("[INFO]: Using TorchScript policy with policy_raw_obs, policy_history_obs, and policy_terrain_obs.")
@@ -768,7 +878,7 @@ def main():
             # agent stepping
             actions = policy(obs_dict if using_custom_runner or using_jit_policy else obs)
             if policy_obs_visualizer is not None:
-                policy_obs_visualizer.update(obs_dict, actions, env)
+                policy_obs_visualizer.update(obs_dict, actions, env, policy)
             # env stepping
             obs, _, _, infos = env.step(actions)
             if using_custom_runner or using_jit_policy or keyboard is not None:
