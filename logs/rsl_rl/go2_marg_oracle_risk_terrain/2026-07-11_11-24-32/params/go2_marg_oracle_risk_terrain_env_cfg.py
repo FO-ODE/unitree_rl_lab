@@ -23,7 +23,6 @@ from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR, ISAACLAB_NUCLEUS_DIR
 from isaaclab.utils.noise import AdditiveUniformNoiseCfg as Unoise
 
 from unitree_rl_lab.assets.robots.unitree import UNITREE_GO2_CFG as ROBOT_CFG
-from unitree_rl_lab.assets.robots.unitree_actuators import UnitreeActuator
 from unitree_rl_lab.tasks.locomotion import mdp
 from .mgdp_terrain import MGDP_TERRAIN_GENERATOR_CFG
 
@@ -114,29 +113,65 @@ GO2_MARG_ORACLE_SPAWN_CFG.replace_asset(
     mesh_link_name="dae",
 )
 
-
-class StartupRandomizedUnitreeActuator(UnitreeActuator):
-    """Unitree actuator that preserves its startup-sampled delay across episode resets."""
-
-    def reset(self, env_ids):
-        # Clear commands from the previous episode without changing the per-environment time lag.
-        self.positions_delay_buffer.reset(env_ids)
-        self.velocities_delay_buffer.reset(env_ids)
-        self.efforts_delay_buffer.reset(env_ids)
-
-
-# Allocate actuator command buffers large enough for the startup delay randomization in EventCfg.
-ACTUATOR_DELAY_BUFFER_STEPS = 2
 GO2_MARG_ORACLE_ROBOT_CFG = ROBOT_CFG.replace(
     spawn=GO2_MARG_ORACLE_SPAWN_CFG,
     actuators={
         "GO2HV": ROBOT_CFG.actuators["GO2HV"].replace(
-            class_type=StartupRandomizedUnitreeActuator,
+            # DelayedPDActuator samples an integer number of physics steps.
+            # With sim dt = 0.005 s, 0..2 steps corresponds to about 0..10 ms.
             min_delay=0,
-            max_delay=ACTUATOR_DELAY_BUFFER_STEPS,
+            max_delay=2,
         )
-    },
+    }
 )
+
+
+# =========================== Scene Config ===========================
+# ====================================================================
+@configclass
+class RobotSceneCfg(InteractiveSceneCfg):
+    """Scene config for the Go2 Marg-Oracle Risk Terrain task."""
+
+    num_envs: int = 4096
+    env_spacing: float = 2.5
+
+    terrain = TerrainImporterCfg(
+        prim_path="/World/ground",
+        terrain_type="generator",
+        terrain_generator=MGDP_TERRAIN_GENERATOR_CFG,
+        max_init_terrain_level=1,
+        collision_group=-1,
+        physics_material=sim_utils.RigidBodyMaterialCfg(
+            friction_combine_mode="multiply",
+            restitution_combine_mode="multiply",
+            static_friction=1.0,
+            dynamic_friction=1.0,
+        ),
+        visual_material=sim_utils.MdlFileCfg(
+            mdl_path=f"{ISAACLAB_NUCLEUS_DIR}/Materials/TilesMarbleSpiderWhiteBrickBondHoned/TilesMarbleSpiderWhiteBrickBondHoned.mdl",
+            project_uvw=True,
+            texture_scale=(0.25, 0.25),
+        ),
+        debug_vis=False,
+    )
+    robot: ArticulationCfg = GO2_MARG_ORACLE_ROBOT_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
+
+    height_scanner = RayCasterCfg(
+        prim_path="{ENV_REGEX_NS}/Robot/base",
+        offset=RayCasterCfg.OffsetCfg(pos=(0.0, 0.0, 20.0)),
+        ray_alignment="yaw",
+        pattern_cfg=patterns.GridPatternCfg(resolution=0.1, size=[1.6, 1.0]),
+        debug_vis=False,
+        mesh_prim_paths=["/World/ground"],
+    )
+    contact_forces = ContactSensorCfg(prim_path="{ENV_REGEX_NS}/Robot/.*", history_length=3, track_air_time=True)
+    sky_light = AssetBaseCfg(
+        prim_path="/World/skyLight",
+        spawn=sim_utils.DomeLightCfg(
+            intensity=750.0,
+            texture_file=f"{ISAAC_NUCLEUS_DIR}/Materials/Textures/Skies/PolyHaven/kloofendal_43d_clear_puresky_4k.hdr",
+        ),
+    )
 
 
 class randomize_rigid_body_material_with_cache(mdp.randomize_rigid_body_material):
@@ -241,53 +276,6 @@ def randomize_motor_strength(
             )
 
 
-def randomize_actuator_delay(
-    env,
-    env_ids: torch.Tensor | None,
-    asset_cfg: SceneEntityCfg,
-    delay_range_steps: tuple[int, int],
-):
-    """Randomize actuator command delay in integer physics steps at startup."""
-
-    asset = env.scene[asset_cfg.name]
-    if env_ids is None:
-        env_ids = torch.arange(env.scene.num_envs, device=asset.device)
-    else:
-        env_ids = env_ids.to(asset.device)
-
-    min_delay, max_delay = delay_range_steps
-    if min_delay < 0 or max_delay < min_delay:
-        raise ValueError(f"Invalid actuator delay range: {delay_range_steps}")
-
-    sampled_delay = torch.randint(
-        low=min_delay,
-        high=max_delay + 1,
-        size=(len(env_ids),),
-        dtype=torch.int,
-        device=asset.device,
-    )
-
-    for actuator_name, actuator in asset.actuators.items():
-        delay_buffers = (
-            getattr(actuator, "positions_delay_buffer", None),
-            getattr(actuator, "velocities_delay_buffer", None),
-            getattr(actuator, "efforts_delay_buffer", None),
-        )
-        if any(buffer is None for buffer in delay_buffers):
-            raise TypeError(f"Actuator '{actuator_name}' does not provide delayed command buffers.")
-        if any(buffer.history_length < max_delay for buffer in delay_buffers):
-            raise ValueError(
-                f"Actuator '{actuator_name}' delay buffer is shorter than requested max delay {max_delay}."
-            )
-        for buffer in delay_buffers:
-            buffer.set_time_lag(sampled_delay, env_ids)
-            buffer.reset(env_ids)
-
-    if not hasattr(env, "_actuator_delay_steps"):
-        env._actuator_delay_steps = torch.zeros(env.scene.num_envs, dtype=torch.int, device=asset.device)
-    env._actuator_delay_steps[env_ids] = sampled_delay
-
-
 def reset_base_with_terrain_orientation(
     env,
     env_ids: torch.Tensor | None,
@@ -375,16 +363,6 @@ class EventCfg:
         },
     )
 
-    actuator_delay = EventTerm(
-        func=randomize_actuator_delay,
-        mode="startup",
-        params={
-            "asset_cfg": SceneEntityCfg("robot"),
-            # With sim dt = 0.005 s, 0..2 physics steps corresponds to 0..10 ms.
-            "delay_range_steps": (0, 2),
-        },
-    )
-
     physics_material = EventTerm(
         func=randomize_rigid_body_material_with_cache,
         mode="startup",
@@ -413,8 +391,8 @@ class EventCfg:
         mode="startup",
         params={
             "asset_cfg": SceneEntityCfg("robot", joint_names=".*"),
-            "stiffness_distribution_params": (0.9, 1.1), # Kp
-            "damping_distribution_params": (0.9, 1.1), # Kd
+            "stiffness_distribution_params": (0.9, 1.1),
+            "damping_distribution_params": (0.9, 1.1),
             "operation": "scale",
         },
     )
@@ -471,54 +449,6 @@ class EventCfg:
         mode="interval",
         interval_range_s=(5.0, 10.0),
         params={"velocity_range": {"x": (-0.5, 0.5), "y": (-0.5, 0.5)}},
-    )
-
-
-# =========================== Scene Config ===========================
-# ====================================================================
-@configclass
-class RobotSceneCfg(InteractiveSceneCfg):
-    """Scene config for the Go2 Marg-Oracle Risk Terrain task."""
-
-    num_envs: int = 4096
-    env_spacing: float = 2.5
-
-    terrain = TerrainImporterCfg(
-        prim_path="/World/ground",
-        terrain_type="generator",
-        terrain_generator=MGDP_TERRAIN_GENERATOR_CFG,
-        max_init_terrain_level=1,
-        collision_group=-1,
-        physics_material=sim_utils.RigidBodyMaterialCfg(
-            friction_combine_mode="multiply",
-            restitution_combine_mode="multiply",
-            static_friction=1.0,
-            dynamic_friction=1.0,
-        ),
-        visual_material=sim_utils.MdlFileCfg(
-            mdl_path=f"{ISAACLAB_NUCLEUS_DIR}/Materials/TilesMarbleSpiderWhiteBrickBondHoned/TilesMarbleSpiderWhiteBrickBondHoned.mdl",
-            project_uvw=True,
-            texture_scale=(0.25, 0.25),
-        ),
-        debug_vis=False,
-    )
-    robot: ArticulationCfg = GO2_MARG_ORACLE_ROBOT_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
-
-    height_scanner = RayCasterCfg(
-        prim_path="{ENV_REGEX_NS}/Robot/base",
-        offset=RayCasterCfg.OffsetCfg(pos=(0.0, 0.0, 20.0)),
-        ray_alignment="yaw",
-        pattern_cfg=patterns.GridPatternCfg(resolution=0.1, size=[1.6, 1.0]),
-        debug_vis=False,
-        mesh_prim_paths=["/World/ground"],
-    )
-    contact_forces = ContactSensorCfg(prim_path="{ENV_REGEX_NS}/Robot/.*", history_length=3, track_air_time=True)
-    sky_light = AssetBaseCfg(
-        prim_path="/World/skyLight",
-        spawn=sim_utils.DomeLightCfg(
-            intensity=750.0,
-            texture_file=f"{ISAAC_NUCLEUS_DIR}/Materials/Textures/Skies/PolyHaven/kloofendal_43d_clear_puresky_4k.hdr",
-        ),
     )
 
 
@@ -756,7 +686,7 @@ class ObservationsCfg:
 
     @configclass
     class PrivilegedObsCfg(ObsGroup):
-        """Privileged observations set used by the critic / auxiliary estimators."""
+        """Privileged state set used by the critic / auxiliary estimators."""
 
         real_linear_velocity = ObsTerm(func=mdp.base_lin_vel, clip=(-100, 100))
         feet_contacts = ObsTerm(
