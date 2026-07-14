@@ -8,7 +8,7 @@ from importlib import import_module
 
 import torch
 
-from .go2_marg_oracle_ppo import Go2MargOraclePPO
+from .go2_marg_ppo import Go2MargPPO
 
 
 def _import_class(import_path: str):
@@ -17,7 +17,7 @@ def _import_class(import_path: str):
     return getattr(module, class_name)
 
 
-class Go2MargOracleRunner:
+class Go2MargRunner:
     """Custom PPO runner for dict-based actor observations."""
 
     def __init__(self, env, train_cfg: dict, log_dir: str | None = None, device="cpu"):
@@ -52,7 +52,7 @@ class Go2MargOracleRunner:
             **self.policy_cfg,
         ).to(self.device)
 
-        self.alg = Go2MargOraclePPO(policy, device=self.device, **self.alg_cfg)
+        self.alg = Go2MargPPO(policy, device=self.device, **self.alg_cfg)
         actor_obs_shapes = {key: tuple(value.shape[1:]) for key, value in actor_obs_dict.items()}
         self.alg.init_storage(
             num_envs=self.env.num_envs,

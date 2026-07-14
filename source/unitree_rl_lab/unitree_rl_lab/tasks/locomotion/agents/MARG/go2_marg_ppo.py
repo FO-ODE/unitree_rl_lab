@@ -5,10 +5,10 @@ import torch.nn as nn
 import torch.optim as optim
 from isaaclab.utils.string import string_to_callable
 
-from .go2_marg_oracle_rollout_storage import Go2MargOracleRolloutStorage
+from .go2_marg_rollout_storage import Go2MargRolloutStorage
 
 
-# Layout of privileged_obs in go2_marg_oracle_velocity_env_cfg.py:
+# Layout of privileged_obs in go2_marg_velocity_env_cfg.py:
 # [0:3]   real_linear_velocity
 # [3:7]   feet_contacts
 # [7:11]  critical_masses
@@ -20,7 +20,7 @@ PRIV_REAL_LINEAR_VEL = slice(0, 3)
 PRIV_FEET_CONTACTS = slice(3, 7)
 
 
-class Go2MargOraclePPO:
+class Go2MargPPO:
     def __init__(
         self,
         policy,
@@ -47,8 +47,8 @@ class Go2MargOraclePPO:
         self.device = device
         self.policy = policy.to(self.device)
         self.optimizer = optim.Adam(self.policy.parameters(), lr=learning_rate)
-        self.storage: Go2MargOracleRolloutStorage | None = None
-        self.transition = Go2MargOracleRolloutStorage.Transition()
+        self.storage: Go2MargRolloutStorage | None = None
+        self.transition = Go2MargRolloutStorage.Transition()
 
         self.clip_param = clip_param
         self.num_learning_epochs = num_learning_epochs
@@ -139,7 +139,7 @@ class Go2MargOraclePPO:
         return torch.nn.functional.mse_loss(mirrored_obs_action_mean, mirrored_action_mean)
 
     def init_storage(self, num_envs, num_transitions_per_env, actor_obs_shapes, critic_obs_shapes, actions_shape):
-        self.storage = Go2MargOracleRolloutStorage(
+        self.storage = Go2MargRolloutStorage(
             num_envs=num_envs,
             num_transitions_per_env=num_transitions_per_env,
             actor_obs_shapes=actor_obs_shapes,

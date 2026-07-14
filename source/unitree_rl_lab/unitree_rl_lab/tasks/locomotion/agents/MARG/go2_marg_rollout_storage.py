@@ -3,7 +3,7 @@ from __future__ import annotations
 import torch
 
 
-class Go2MargOracleRolloutStorage:
+class Go2MargRolloutStorage:
     class Transition:
         def __init__(self):
             self.actor_observations = None

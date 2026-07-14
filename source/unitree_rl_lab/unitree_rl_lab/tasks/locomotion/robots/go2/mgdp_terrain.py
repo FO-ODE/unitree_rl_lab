@@ -18,7 +18,7 @@ MGDP_GAP_PARKOUR_WEIGHTS = {
     "beams": 0.1,
     "air_beams": 0.1,
     "air_stairs": 0.1,
-    "flat_turn": 0.3,
+    "flat_turn": 0.0,
 }
 
 MGDP_PIT_DEPTH_M = 0.6

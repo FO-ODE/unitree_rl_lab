@@ -25,12 +25,12 @@ def gait_phase(env: ManagerBasedRLEnv, period: float) -> torch.Tensor:
 # ======================= go2 Observation Space ===========================
 # =========================================================================
 
-def oracle_terrain_map(
+def terrain_map(
     env,
     sensor_cfg: SceneEntityCfg = SceneEntityCfg("height_scanner"),
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
 ) -> torch.Tensor:
-    """Robot-centered oracle terrain map as relative heights: base_z - terrain_z."""
+    """Robot-centered terrain map as relative heights: base_z - terrain_z."""
 
     sensor = env.scene.sensors[sensor_cfg.name]
     asset = env.scene[asset_cfg.name]

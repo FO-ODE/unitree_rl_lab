@@ -33,7 +33,7 @@ def _seed_from_start_minute_second() -> int:
     return now.minute * 100 + now.second
 
 
-GO2_MARG_ORACLE_RISK_TERRAIN_SEED = _seed_from_start_minute_second()
+GO2_MARG_RISK_TERRAIN_SEED = _seed_from_start_minute_second()
 
 GO2_MODIFIED_DESCRIPTION_DIR = Path(__file__).resolve().parents[7] / "LidarSim2Real/go2_urdf_modified"
 GO2_MODIFIED_URDF_PATH = GO2_MODIFIED_DESCRIPTION_DIR / "urdf/go2_description.urdf"
@@ -101,14 +101,14 @@ def assign_flat_turn_envs_to_center_column(env, env_ids, terrain_name: str = "fl
     terrain.env_origins[remap_env_ids] = terrain.terrain_origins[terrain.terrain_levels[remap_env_ids], center_column]
 
 
-_set_mgdp_terrain_seed(MGDP_TERRAIN_GENERATOR_CFG, GO2_MARG_ORACLE_RISK_TERRAIN_SEED)
+_set_mgdp_terrain_seed(MGDP_TERRAIN_GENERATOR_CFG, GO2_MARG_RISK_TERRAIN_SEED)
 FEET_ON_BASE_PLANE_TERRAINS = tuple(
     name for name in MGDP_TERRAIN_GENERATOR_CFG.sub_terrains.keys() if name != "flat_turn"
 )
 
 
-GO2_MARG_ORACLE_SPAWN_CFG = ROBOT_CFG.spawn.replace(asset_path=str(GO2_MODIFIED_URDF_PATH))
-GO2_MARG_ORACLE_SPAWN_CFG.replace_asset(
+GO2_MARG_SPAWN_CFG = ROBOT_CFG.spawn.replace(asset_path=str(GO2_MODIFIED_URDF_PATH))
+GO2_MARG_SPAWN_CFG.replace_asset(
     meshes_dir=str(GO2_MODIFIED_DAE_DIR),
     urdf_path=str(GO2_MODIFIED_URDF_PATH),
     mesh_link_name="dae",
@@ -127,8 +127,8 @@ class StartupRandomizedUnitreeActuator(UnitreeActuator):
 
 # Allocate actuator command buffers large enough for the startup delay randomization in EventCfg.
 ACTUATOR_DELAY_BUFFER_STEPS = 2
-GO2_MARG_ORACLE_ROBOT_CFG = ROBOT_CFG.replace(
-    spawn=GO2_MARG_ORACLE_SPAWN_CFG,
+GO2_MARG_ROBOT_CFG = ROBOT_CFG.replace(
+    spawn=GO2_MARG_SPAWN_CFG,
     actuators={
         "GO2HV": ROBOT_CFG.actuators["GO2HV"].replace(
             class_type=StartupRandomizedUnitreeActuator,
@@ -478,7 +478,7 @@ class EventCfg:
 # ====================================================================
 @configclass
 class RobotSceneCfg(InteractiveSceneCfg):
-    """Scene config for the Go2 Marg-Oracle Risk Terrain task."""
+    """Scene config for the Go2 Marg Risk Terrain task."""
 
     num_envs: int = 4096
     env_spacing: float = 2.5
@@ -502,7 +502,7 @@ class RobotSceneCfg(InteractiveSceneCfg):
         ),
         debug_vis=False,
     )
-    robot: ArticulationCfg = GO2_MARG_ORACLE_ROBOT_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
+    robot: ArticulationCfg = GO2_MARG_ROBOT_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
 
     height_scanner = RayCasterCfg(
         prim_path="{ENV_REGEX_NS}/Robot/base",
@@ -583,15 +583,15 @@ TERRAIN_GRID_X_POINTS = 17
 
 
 @torch.no_grad()
-def compute_symmetric_states_go2_marg_oracle(env, obs, actions):
-    """Left-right data augmentation for Go2 MARG-Oracle observations/actions."""
+def compute_symmetric_states_go2_marg(env, obs, actions):
+    """Left-right data augmentation for Go2 MARG observations/actions."""
 
-    obs_aug = _augment_go2_marg_oracle_obs(obs) if obs is not None else None
-    actions_aug = _augment_go2_marg_oracle_actions(actions) if actions is not None else None
+    obs_aug = _augment_go2_marg_obs(obs) if obs is not None else None
+    actions_aug = _augment_go2_marg_actions(actions) if actions is not None else None
     return obs_aug, actions_aug
 
 
-def _augment_go2_marg_oracle_obs(obs: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+def _augment_go2_marg_obs(obs: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
     batch_size = next(iter(obs.values())).shape[0]
     obs_aug = {}
 
@@ -614,7 +614,7 @@ def _augment_go2_marg_oracle_obs(obs: dict[str, torch.Tensor]) -> dict[str, torc
     return obs_aug
 
 
-def _augment_go2_marg_oracle_actions(actions: torch.Tensor) -> torch.Tensor:
+def _augment_go2_marg_actions(actions: torch.Tensor) -> torch.Tensor:
     batch_size = actions.shape[0]
     actions_aug = torch.empty(batch_size * 2, *actions.shape[1:], device=actions.device, dtype=actions.dtype)
     actions_aug[:batch_size] = actions
@@ -708,7 +708,7 @@ def _switch_go2_joints_left_right(joint_data: torch.Tensor, flip_haa: bool) -> t
 # =========================================================================
 @configclass
 class ObservationsCfg:
-    """Observation layout for the Go2 Marg-Oracle velocity task."""
+    """Observation layout for the Go2 MARG task."""
 
     @configclass
     class ProprioObsCfg(ObsGroup):
@@ -741,10 +741,10 @@ class ObservationsCfg:
 
     @configclass
     class TerrainMapObsCfg(ObsGroup):
-        """187D oracle terrain map."""
+        """187D terrain map."""
 
         terrain_map = ObsTerm(
-            func=mdp.oracle_terrain_map,
+            func=mdp.terrain_map,
             params={"sensor_cfg": SceneEntityCfg("height_scanner"), "asset_cfg": SceneEntityCfg("robot")},
             clip=(-1.0, 1.0),
             noise=Unoise(n_min=-0.05, n_max=0.05),
@@ -802,9 +802,9 @@ class ObservationsCfg:
     class CriticObsCfg(ProprioObsCfg):
         """Critic observation: proprio + terrain + privileged."""
 
-        # terrain map is included in the critic obs for oracle methods
+        # terrain map is included in the critic obs
         terrain_map = ObsTerm(
-            func=mdp.oracle_terrain_map,
+            func=mdp.terrain_map,
             params={"sensor_cfg": SceneEntityCfg("height_scanner"), "asset_cfg": SceneEntityCfg("robot")},
             clip=(-1.0, 1.0),
             noise=Unoise(n_min=-0.05, n_max=0.05),
@@ -971,7 +971,7 @@ class CurriculumCfg:
 # =========================================================================
 @configclass
 class RobotEnvCfg(ManagerBasedRLEnvCfg):
-    """Go2 Marg-Oracle velocity task config."""
+    """Go2 Marg task config."""
 
     scene: RobotSceneCfg = RobotSceneCfg()
     actions: ActionsCfg = ActionsCfg()
@@ -1033,7 +1033,7 @@ def _play_terrain_generator_cfg(terrain_type: str):
 
 @configclass
 class RobotPlayEnvCfg(RobotEnvCfg):
-    """Play config for the Go2 Marg-Oracle velocity task."""
+    """Play config for the Go2 Marg risk terrain task."""
 
     play_terrain_type: str = PLAY_TERRAIN_TYPE
 

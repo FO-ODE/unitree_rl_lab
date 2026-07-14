@@ -19,7 +19,18 @@ def _build_mlp(input_dim: int, hidden_dims: list[int], output_dim: int, activati
     return nn.Sequential(*layers)
 
 
-class Go2MargOracleActorCritic(nn.Module):
+class ZeroEstimator(nn.Module):
+    """Parameter-free estimator that always returns a fixed-size zero feature."""
+
+    def __init__(self, output_dim: int):
+        super().__init__()
+        self.output_dim = output_dim
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return x.new_zeros((x.shape[0], self.output_dim))
+
+
+class Go2MargActorCritic(nn.Module):
     is_recurrent = False
 
     def __init__(
@@ -43,7 +54,7 @@ class Go2MargOracleActorCritic(nn.Module):
         super().__init__()
         if kwargs:
             print(
-                "Go2MargOracleActorCritic.__init__ got unexpected arguments, which will be ignored: "
+                "Go2MargActorCritic.__init__ got unexpected arguments, which will be ignored: "
                 + str([key for key in kwargs.keys()])
             )
 
@@ -67,13 +78,8 @@ class Go2MargOracleActorCritic(nn.Module):
         )
         
         # ====================== EstimatorNet ======================
-        # 256*128*7
-        self.estimator_net = _build_mlp(
-            proprioception_history,
-            estimator_hidden_dims,
-            estimator_output_dim,
-            activation_name=self.estimator_activation,
-        )
+        # Keep the original 7D actor-input contract, but disable estimator influence and training.
+        self.estimator_net = ZeroEstimator(estimator_output_dim)
         
         
         actor_input_dim = proprioception + terrain_feat_dim + estimator_output_dim
