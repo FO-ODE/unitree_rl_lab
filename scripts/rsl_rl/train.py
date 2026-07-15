@@ -207,6 +207,12 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         inspect.getfile(env_cfg.__class__),
         os.path.join(log_dir, "params", os.path.basename(inspect.getfile(env_cfg.__class__))),
     )
+    # Keep the exact MGDP terrain generator used by this run alongside the
+    # environment configuration. Non-MGDP tasks do not have this sibling file.
+    env_cfg_path = pathlib.Path(inspect.getfile(env_cfg.__class__))
+    mgdp_terrain_path = env_cfg_path.with_name("mgdp_terrain.py")
+    if mgdp_terrain_path.is_file():
+        shutil.copy(mgdp_terrain_path, pathlib.Path(log_dir, "params", mgdp_terrain_path.name))
 
     # run training
     runner.learn(num_learning_iterations=agent_cfg.max_iterations, init_at_random_ep_len=True)
