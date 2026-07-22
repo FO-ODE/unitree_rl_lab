@@ -6,13 +6,7 @@
 from isaaclab.utils import configclass
 from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlPpoActorCriticCfg, RslRlPpoAlgorithmCfg, RslRlSymmetryCfg
 
-
-def compute_symmetric_states_go2_marg(env, obs, actions):
-    from unitree_rl_lab.tasks.locomotion.robots.go2.go2_marg_risk_terrain_env_cfg import (
-        compute_symmetric_states_go2_marg as data_augmentation_func,
-    )
-
-    return data_augmentation_func(env, obs, actions)
+from .symmetry import compute_symmetric_states_go2_marg
 
 
 @configclass
