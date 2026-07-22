@@ -64,8 +64,8 @@ class Go2MargActorCritic(nn.Module):
         self.privileged = privileged
         self.terrain_feat_dim = terrain_feat_dim
         self.estimator_output_dim = estimator_output_dim
-        self.estimator_activation = "relu"
-        self.elevation_activation = "relu"
+        self.estimator_activation = "elu"
+        self.elevation_activation = "elu"
 
 
         # ====================== ElevationNet ======================
@@ -78,8 +78,13 @@ class Go2MargActorCritic(nn.Module):
         )
         
         # ====================== EstimatorNet ======================
-        # Keep the original 7D actor-input contract, but disable estimator influence and training.
-        self.estimator_net = ZeroEstimator(estimator_output_dim)
+        # Encode the 270D proprioception history into the 7D actor feature.
+        self.estimator_net = _build_mlp(
+            proprioception_history,
+            estimator_hidden_dims,
+            estimator_output_dim,
+            activation_name=self.estimator_activation,
+        )
         
         
         actor_input_dim = proprioception + terrain_feat_dim + estimator_output_dim

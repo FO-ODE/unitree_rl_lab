@@ -944,7 +944,7 @@ class RewardsCfg:
     )
     air_time_variance = RewTerm(
         func=mdp.air_time_variance_penalty,
-        weight=-2.0,
+        weight=-1.0,
         params={"sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*_foot")},
     )
     feet_stumble = RewTerm(

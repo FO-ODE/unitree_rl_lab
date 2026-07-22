@@ -15,7 +15,6 @@ from isaaclab.managers import ObservationTermCfg as ObsTerm
 from isaaclab.managers import RewardTermCfg as RewTerm
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.managers import TerminationTermCfg as DoneTerm
-from isaaclab.managers.manager_base import ManagerTermBase
 from isaaclab.scene import InteractiveSceneCfg
 from isaaclab.sensors import ContactSensorCfg, RayCasterCfg, patterns
 from isaaclab.terrains import TerrainImporterCfg
@@ -27,29 +26,6 @@ from unitree_rl_lab.assets.robots.unitree import UNITREE_GO2_CFG as ROBOT_CFG
 from unitree_rl_lab.assets.robots.unitree_actuators import UnitreeActuator
 from unitree_rl_lab.tasks.locomotion import mdp
 from .mgdp_terrain import MGDP_TERRAIN_GENERATOR_CFG
-
-
-class action_smoothness_l2(ManagerTermBase):
-    """Penalize the second-order difference of consecutive policy actions."""
-
-    def __init__(self, cfg, env):
-        super().__init__(cfg, env)
-        self._last_last_action = torch.zeros_like(env.action_manager.action)
-
-    def reset(self, env_ids=None):
-        if env_ids is None:
-            env_ids = slice(None)
-        self._last_last_action[env_ids] = 0.0
-
-    def __call__(self, env):
-        second_difference = (
-            env.action_manager.action
-            - 2.0 * env.action_manager.prev_action
-            + self._last_last_action
-        )
-        penalty = torch.sum(torch.square(second_difference), dim=1)
-        self._last_last_action.copy_(env.action_manager.prev_action)
-        return penalty
 
 
 def _seed_from_start_minute_second() -> int:
@@ -910,7 +886,6 @@ class RewardsCfg:
     base_angular_velocity_xy = RewTerm(func=mdp.ang_vel_xy_l2, weight=-0.05)
     joint_torques = RewTerm(func=mdp.joint_torques_l2, weight=-1.0e-5)
     action_rate = RewTerm(func=mdp.action_rate_l2, weight=-0.01)
-    action_smoothness = RewTerm(func=action_smoothness_l2, weight=-0.01)
     joint_acc = RewTerm(func=mdp.joint_acc_l2, weight=-2.5e-7)
 
     # -- safety
@@ -944,7 +919,7 @@ class RewardsCfg:
     )
     air_time_variance = RewTerm(
         func=mdp.air_time_variance_penalty,
-        weight=-2.0,
+        weight=-1.0,
         params={"sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*_foot")},
     )
     feet_stumble = RewTerm(
