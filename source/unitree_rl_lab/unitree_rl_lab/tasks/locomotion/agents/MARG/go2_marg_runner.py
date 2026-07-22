@@ -29,7 +29,7 @@ class Go2MargRunner:
 
         obs, extras = self.env.get_observations()
         obs_dict = extras["observations"]
-        actor_obs_keys = ["policy_raw_obs", "policy_history_obs", "policy_terrain_obs"]
+        actor_obs_keys = ["policy_raw_obs", "policy_history_obs", "policy_terrain_obs", "privileged_obs"]
         critic_obs_keys = ["policy_raw_obs", "policy_terrain_obs", "privileged_obs"]
 
         actor_obs_dict = {key: obs_dict[key].to(self.device) for key in actor_obs_keys}

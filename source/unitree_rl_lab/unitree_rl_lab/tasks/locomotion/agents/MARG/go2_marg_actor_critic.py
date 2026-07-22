@@ -85,6 +85,7 @@ class Go2MargActorCritic(nn.Module):
             estimator_output_dim,
             activation_name=self.estimator_activation,
         )
+        self.estimator_net.requires_grad_(False)
         
         
         actor_input_dim = proprioception + terrain_feat_dim + estimator_output_dim
@@ -107,7 +108,7 @@ class Go2MargActorCritic(nn.Module):
             activation_name=activation)
 
         print(f"ElevationNet: {self.elevation_net}")
-        print(f"EstimatorNet: {self.estimator_net}")
+        print(f"EstimatorNet (frozen and bypassed): {self.estimator_net}")
         print(f"Actor MLP: {self.actor}")
         print(f"Critic MLP: {self.critic}")
 
@@ -140,14 +141,11 @@ class Go2MargActorCritic(nn.Module):
 
     def _encode_actor_obs(self, observations: dict[str, torch.Tensor]) -> torch.Tensor:
         raw_obs = observations["policy_raw_obs"]
-        history_obs = observations["policy_history_obs"]
         terrain_obs = observations["policy_terrain_obs"]
-
         terrain_feat = self.elevation_net(terrain_obs)
-        estimator_input = history_obs
-        est_feat = self.estimator_net(estimator_input)
-        self._latest_estimator_output = est_feat
-        return torch.cat((raw_obs, terrain_feat, est_feat), dim=-1)
+        zero_estimator_feat = raw_obs.new_zeros((raw_obs.shape[0], self.estimator_output_dim))
+        self._latest_estimator_output = zero_estimator_feat
+        return torch.cat((raw_obs, terrain_feat, zero_estimator_feat), dim=-1)
 
     def _encode_critic_obs(self, observations: dict[str, torch.Tensor]) -> torch.Tensor:
         raw_obs = observations["policy_raw_obs"]
@@ -181,7 +179,6 @@ class Go2MargActorCritic(nn.Module):
         return self.critic(self._encode_critic_obs(critic_observations))
 
     def estimate(self, observations: dict[str, torch.Tensor]) -> torch.Tensor:
-        raw_obs = observations["policy_raw_obs"]
-        history_obs = observations["policy_history_obs"]
-        estimator_input = history_obs
-        return self.estimator_net(estimator_input)
+        """Return the ground-truth velocity/contact feature used by the actor."""
+
+        return observations["privileged_obs"][..., : self.estimator_output_dim]

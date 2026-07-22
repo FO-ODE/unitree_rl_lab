@@ -35,9 +35,7 @@ class Go2MargActorCriticCfg(RslRlPpoActorCriticCfg):
 
 @configclass
 class Go2MargPPOAlgorithmCfg(RslRlPpoAlgorithmCfg):
-    estimator_loss_coef = 1.0
-    velocity_loss_coef = 1.0
-    contact_loss_coef = 0.5
+    pass
 
 
 @configclass
