@@ -64,7 +64,6 @@ parser.add_argument(
     default=None,
     help="Show a live matplotlib view of policy raw/history/terrain observations and actions.",
 )
-parser.add_argument("--policy_obs_refresh_hz", type=float, default=10.0, help="Policy observation visualizer refresh rate.")
 # append RSL-RL cli arguments
 cli_args.add_rsl_rl_args(parser)
 # append AppLauncher cli args
@@ -203,13 +202,13 @@ def _load_marg_oracle_jit_policy(policy_path: str, device: str | torch.device):
 class PolicyObsVisualizer:
     """Live matplotlib view of the observations fed to the MARG-Oracle policy."""
 
-    def __init__(self, refresh_hz: float):
+    def __init__(self):
         import matplotlib.pyplot as plt
         import numpy as np
 
         self.plt = plt
         self.np = np
-        self.refresh_dt = 1.0 / max(refresh_hz, 1.0e-3)
+        self.refresh_dt = 1.0 / 10.0
         self.last_draw_time = 0.0
         plt.ion()
 
@@ -795,7 +794,7 @@ def main():
 
     if args_cli.policy_obs_visualizer:
         try:
-            policy_obs_visualizer = PolicyObsVisualizer(args_cli.policy_obs_refresh_hz)
+            policy_obs_visualizer = PolicyObsVisualizer()
             print("[INFO]: Policy observation visualizer enabled.")
         except Exception as exc:
             policy_obs_visualizer = None
