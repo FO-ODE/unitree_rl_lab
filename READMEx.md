@@ -41,6 +41,25 @@ python scripts/rsl_rl/play.py   --task Unitree-Go2-MARG-Risk-Terrain   --jit_pol
 ./unitree_rl_lab.sh -r ./scripts/rsl_rl/train.py --task Unitree-Go2-MARG-Risk-Terrain
 ```
 
+## Checkpoint
+
+```bash
+./unitree_rl_lab.sh -p \
+  --task Unitree-Go2-MARG-Risk-Terrain \
+  --checkpoint logs/rsl_rl/go2_marg_risk_terrain/2026-07-29_15-42-14/model_60000.pt
+
+./unitree_rl_lab.sh -p \
+  --task Unitree-Go2-MARG-Risk-Terrain \
+  --checkpoint logs/rsl_rl/go2_marg_risk_terrain/2026-07-29_15-42-14/model_85000.pt
+
+
+./unitree_rl_lab.sh -p \
+  --task Unitree-Go2-MARG-Risk-Terrain \
+  --checkpoint logs/rsl_rl/go2_marg_risk_terrain/2026-07-30_17-01-44/model_110000.pt
+
+
+```
+
 ## Tensorboard
 
 In `/unitree_rl_lab`
