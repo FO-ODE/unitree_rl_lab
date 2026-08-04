@@ -6,21 +6,8 @@ import trimesh
 from isaaclab.terrains import SubTerrainBaseCfg, TerrainGeneratorCfg
 from isaaclab.utils import configclass
 
-MGDP_GAP_PARKOUR_WEIGHTS_STAGE1 = {
-    "single_gap": 0.0,
-    "stone_everywhere": 0.0,
-    "stones_2rows": 0.0,
-    "stones_2rows_staggered": 0.0,
-    "stones_1row": 0.0,
-    "single_bridge": 0.0,
-    "stairs": 0.0,
-    "beams": 0.0,
-    "air_beams": 0.0,
-    "air_stairs": 0.0,
-    "flat_turn": 0.3,
-}
 
-MGDP_GAP_PARKOUR_WEIGHTS_STAGE2 = {
+MGDP_GAP_PARKOUR_WEIGHTS = {
     "single_gap": 0.1,
     "stone_everywhere": 0.1,
     "stones_2rows": 0.1,
@@ -33,10 +20,6 @@ MGDP_GAP_PARKOUR_WEIGHTS_STAGE2 = {
     "air_stairs": 0.1,
     "flat_turn": 0.3,
 }
-
-# Generate the complete terrain set once.  Stage 1 is implemented by assigning
-# environments only to its subset of the already generated stage-2 columns.
-MGDP_GAP_PARKOUR_WEIGHTS = MGDP_GAP_PARKOUR_WEIGHTS_STAGE2
 
 MGDP_PIT_DEPTH_M = 0.6
 MGDP_PLATFORM_SIZE_M = 2.0

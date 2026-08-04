@@ -66,6 +66,7 @@ class Go2MargRunner:
         self.critic_obs_keys = critic_obs_keys
         self.num_steps_per_env = train_cfg["num_steps_per_env"]
         self.save_interval = train_cfg["save_interval"]
+        self.terrain_stage_switch_iteration = train_cfg.get("terrain_stage_switch_iteration")
         self.empirical_normalization = False
         self.log_dir = log_dir
         self.writer = None
@@ -73,6 +74,29 @@ class Go2MargRunner:
         self.tot_timesteps = 0
         self.tot_time = 0
         self.git_status_repos = []
+
+    def _update_terrain_stage(self, iteration: int):
+        """Apply an iteration-based terrain stage and reset after a transition."""
+        if self.terrain_stage_switch_iteration is None:
+            return None
+
+        base_env = self.env.unwrapped
+        stage = 1 if iteration < self.terrain_stage_switch_iteration else 2
+        from unitree_rl_lab.tasks.locomotion.robots.go2.go2_marg_risk_terrain_env_cfg import (
+            assign_mgdp_terrain_stage,
+        )
+
+        changed = assign_mgdp_terrain_stage(base_env, None, stage)
+        if not changed:
+            return None
+
+        print(f"[INFO] MGDP terrain curriculum switched to stage {stage} at iteration {iteration}.")
+        # Environment stepping is performed under inference mode below, which
+        # makes Isaac Lab's articulation state buffers inference tensors.  The
+        # forced reset at a stage boundary must use the same context because it
+        # updates those buffers in place.
+        with torch.inference_mode():
+            return self.env.reset()
 
     def add_git_repo_to_log(self, repo_file_path):
         self.git_status_repos.append(repo_file_path)
@@ -125,12 +149,17 @@ class Go2MargRunner:
 
             self.writer = SummaryWriter(log_dir=self.log_dir, flush_secs=10)
 
+        stage_reset = self._update_terrain_stage(self.current_learning_iteration)
+
         if init_at_random_ep_len:
             self.env.episode_length_buf = torch.randint_like(
                 self.env.episode_length_buf, high=int(self.env.max_episode_length)
             )
 
-        obs, extras = self.env.get_observations()
+        if stage_reset is None:
+            obs, extras = self.env.get_observations()
+        else:
+            obs, extras = stage_reset
         obs_dict = extras["observations"]
         actor_obs = self._extract_actor_obs(obs_dict)
         critic_obs_dict = self._extract_critic_obs(obs_dict)
@@ -145,6 +174,15 @@ class Go2MargRunner:
         start_iter = self.current_learning_iteration
         tot_iter = start_iter + num_learning_iterations
         for it in range(start_iter, tot_iter):
+            stage_reset = self._update_terrain_stage(it)
+            if stage_reset is not None:
+                obs, extras = stage_reset
+                obs_dict = extras["observations"]
+                actor_obs = self._extract_actor_obs(obs_dict)
+                critic_obs_dict = self._extract_critic_obs(obs_dict)
+                cur_reward_sum.zero_()
+                cur_episode_length.zero_()
+
             start = time.time()
             with torch.inference_mode():
                 for _ in range(self.num_steps_per_env):

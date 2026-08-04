@@ -92,6 +92,8 @@ class Go2MargRiskTerrainPPORunnerCfg(Go2MargPPORunnerCfg):
     """PPO runner config for Unitree-Go2-MARG-Risk-Terrain task."""
 
     task_type = "risk_terrain"
+    max_iterations = 30000
+    terrain_stage_switch_iteration = 1000
     algorithm = Go2MargPPOAlgorithmCfg(
         value_loss_coef=1.0,
         use_clipped_value_loss=True,

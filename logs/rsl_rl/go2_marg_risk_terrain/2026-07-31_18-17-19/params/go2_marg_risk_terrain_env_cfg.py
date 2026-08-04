@@ -26,11 +26,7 @@ from isaaclab.utils.noise import AdditiveUniformNoiseCfg as Unoise
 from unitree_rl_lab.assets.robots.unitree import UNITREE_GO2_CFG as ROBOT_CFG
 from unitree_rl_lab.assets.robots.unitree_actuators import UnitreeActuator
 from unitree_rl_lab.tasks.locomotion import mdp
-from .mgdp_terrain import (
-    MGDP_GAP_PARKOUR_WEIGHTS_STAGE1,
-    MGDP_GAP_PARKOUR_WEIGHTS_STAGE2,
-    MGDP_TERRAIN_GENERATOR_CFG,
-)
+from .mgdp_terrain import MGDP_TERRAIN_GENERATOR_CFG
 
 
 class action_smoothness_l2(ManagerTermBase):
@@ -127,93 +123,6 @@ def assign_flat_turn_envs_to_center_column(env, env_ids, terrain_name: str = "fl
 
     terrain.terrain_types[remap_env_ids] = center_column
     terrain.env_origins[remap_env_ids] = terrain.terrain_origins[terrain.terrain_levels[remap_env_ids], center_column]
-
-
-MGDP_TERRAIN_STAGE_WEIGHTS = {
-    1: MGDP_GAP_PARKOUR_WEIGHTS_STAGE1,
-    2: MGDP_GAP_PARKOUR_WEIGHTS_STAGE2,
-}
-
-
-def assign_mgdp_terrain_stage(env, env_ids, stage: int) -> bool:
-    """Assign environments to a pre-generated MGDP terrain-stage subset.
-
-    The stage-2 terrain mesh is generated once at startup.  Changing stage only
-    changes each environment's terrain column and origin; it does not rebuild
-    any terrain meshes or collision geometry.
-
-    Returns:
-        Whether the active stage changed.
-    """
-    if stage not in MGDP_TERRAIN_STAGE_WEIGHTS:
-        raise ValueError(f"Unknown MGDP terrain stage {stage}. Valid stages: {tuple(MGDP_TERRAIN_STAGE_WEIGHTS)}")
-
-    terrain = env.scene.terrain
-    if terrain.terrain_origins is None or not hasattr(terrain, "terrain_types"):
-        return False
-    previous_stage = getattr(env, "_mgdp_terrain_stage", None)
-    if previous_stage == stage:
-        return False
-
-    if env_ids is None:
-        env_ids = torch.arange(env.scene.num_envs, dtype=torch.long, device=env.device)
-    else:
-        env_ids = torch.as_tensor(env_ids, dtype=torch.long, device=env.device)
-    if env_ids.numel() == 0:
-        return False
-
-    generator_cfg = env.cfg.scene.terrain.terrain_generator
-    stage_names = {
-        name for name, weight in MGDP_TERRAIN_STAGE_WEIGHTS[stage].items() if float(weight) > 0.0
-    }
-    stage_columns = [
-        column
-        for name in stage_names
-        for column in _subterrain_column_indices(generator_cfg, name)
-    ]
-    stage_columns.sort()
-    if not stage_columns:
-        raise RuntimeError(f"MGDP terrain stage {stage} has no generated terrain columns.")
-
-    columns = torch.tensor(stage_columns, dtype=torch.long, device=env.device)
-    assignment = torch.div(
-        torch.arange(env_ids.numel(), device=env.device) * columns.numel(),
-        env_ids.numel(),
-        rounding_mode="floor",
-    )
-    terrain.terrain_types[env_ids] = columns[assignment]
-
-    # Flat terrain has multiple columns only to preserve its requested sampling
-    # weight.  Reuse the center copy, as before, while retaining that weight.
-    flat_columns = _subterrain_column_indices(generator_cfg, "flat_turn")
-    if "flat_turn" in stage_names and flat_columns:
-        flat_columns_tensor = torch.tensor(flat_columns, dtype=torch.long, device=env.device)
-        is_flat = torch.isin(terrain.terrain_types[env_ids], flat_columns_tensor)
-        terrain.terrain_types[env_ids[is_flat]] = flat_columns[len(flat_columns) // 2]
-    else:
-        is_flat = torch.zeros(env_ids.numel(), dtype=torch.bool, device=env.device)
-
-    # Flat-turn proficiency can reach high terrain rows during stage 1.  Newly
-    # introduced obstacle types should still begin at the configured initial
-    # difficulty instead of inheriting those high flat-terrain levels.
-    if previous_stage == 1 and stage == 2:
-        obstacle_env_ids = env_ids[~is_flat]
-        max_init_level = generator_cfg.num_rows - 1
-        if terrain.cfg.max_init_terrain_level is not None:
-            max_init_level = min(max_init_level, terrain.cfg.max_init_terrain_level)
-        terrain.terrain_levels[obstacle_env_ids] = torch.randint(
-            0,
-            max_init_level + 1,
-            (obstacle_env_ids.numel(),),
-            dtype=terrain.terrain_levels.dtype,
-            device=env.device,
-        )
-
-    terrain.env_origins[env_ids] = terrain.terrain_origins[
-        terrain.terrain_levels[env_ids], terrain.terrain_types[env_ids]
-    ]
-    env._mgdp_terrain_stage = stage
-    return True
 
 
 _set_mgdp_terrain_seed(MGDP_TERRAIN_GENERATOR_CFG, GO2_MARG_RISK_TERRAIN_SEED)
@@ -482,11 +391,11 @@ class EventCfg:
     """Configuration for events."""
 
     # startup
-    terrain_stage = EventTerm(
-        func=assign_mgdp_terrain_stage,
+    flat_turn_center_column = EventTerm(
+        func=assign_flat_turn_envs_to_center_column,
         mode="startup",
         params={
-            "stage": 1,
+            "terrain_name": "flat_turn",
         },
     )
 
@@ -645,13 +554,13 @@ FORWARD_ONLY_LIN_VEL_X = (0.1, 1.0)
 FORWARD_ONLY_LIN_VEL_X_LIMIT = (0.1, 1.5)
 FORWARD_ONLY_LIN_VEL_Y = (-0.01, 0.01)
 FORWARD_ONLY_ANG_VEL_Z = (-0.01, 0.01)
-FLAT_LIN_VEL_X_START = (-0.3, 1.0)
-FLAT_LIN_VEL_X_END = (-0.6, 1.5)
-FLAT_LIN_VEL_Y_START_ABS = (0.0, 0.5)
-FLAT_LIN_VEL_Y_END_ABS = (0.0, 1.0)
-FLAT_ANG_VEL_Z_START_ABS = (0.15, 1.0)
-FLAT_ANG_VEL_Z_END_ABS = (0.0, 2.0)
-FLAT_MODE_PROBABILITIES = (0.2, 0.2, 0.2, 0.4)  # backward, lateral, turn, mixed
+FLAT_LOCOMOTION_LIN_VEL_X_START = (-0.3, 0.6)
+FLAT_LOCOMOTION_LIN_VEL_X_END = (-0.6, 1.0)
+FLAT_LOCOMOTION_LIN_VEL_Y_START_ABS = (0.0, 0.2)
+FLAT_LOCOMOTION_LIN_VEL_Y_END_ABS = (0.0, 0.5)
+FLAT_LOCOMOTION_ANG_VEL_Z_START_ABS = (0.15, 0.5)
+FLAT_LOCOMOTION_ANG_VEL_Z_END_ABS = (0.0, 1.2)
+FLAT_LOCOMOTION_MODE_PROBABILITIES = (0.2, 0.2, 0.2, 0.4)  # backward, lateral, turn, mixed
 
 
 @configclass
@@ -673,13 +582,13 @@ class CommandsCfg:
             lin_vel_y=FORWARD_ONLY_LIN_VEL_Y,
             ang_vel_z=FORWARD_ONLY_ANG_VEL_Z,
         ),
-        turn_lin_vel_x_start=FLAT_LIN_VEL_X_START,
-        turn_lin_vel_x_end=FLAT_LIN_VEL_X_END,
-        turn_lin_vel_y_start_abs=FLAT_LIN_VEL_Y_START_ABS,
-        turn_lin_vel_y_end_abs=FLAT_LIN_VEL_Y_END_ABS,
-        turn_ang_vel_z_start_abs=FLAT_ANG_VEL_Z_START_ABS,
-        turn_ang_vel_z_end_abs=FLAT_ANG_VEL_Z_END_ABS,
-        flat_locomotion_mode_probabilities=FLAT_MODE_PROBABILITIES,
+        turn_lin_vel_x_start=FLAT_LOCOMOTION_LIN_VEL_X_START,
+        turn_lin_vel_x_end=FLAT_LOCOMOTION_LIN_VEL_X_END,
+        turn_lin_vel_y_start_abs=FLAT_LOCOMOTION_LIN_VEL_Y_START_ABS,
+        turn_lin_vel_y_end_abs=FLAT_LOCOMOTION_LIN_VEL_Y_END_ABS,
+        turn_ang_vel_z_start_abs=FLAT_LOCOMOTION_ANG_VEL_Z_START_ABS,
+        turn_ang_vel_z_end_abs=FLAT_LOCOMOTION_ANG_VEL_Z_END_ABS,
+        flat_locomotion_mode_probabilities=FLAT_LOCOMOTION_MODE_PROBABILITIES,
     )
 
 
@@ -1028,11 +937,8 @@ class RobotPlayEnvCfg(RobotEnvCfg):
         play_terrain_type, terrain_generator_cfg = _play_terrain_generator_cfg(self.play_terrain_type)
         self.scene.terrain.terrain_generator = terrain_generator_cfg
         if play_terrain_type == "test":
-            self.events.terrain_stage = None
             self.scene.terrain.terrain_generator.curriculum = False
             self.scene.terrain.terrain_generator.num_rows = 3
-        else:
-            self.events.terrain_stage.params["stage"] = 2
         self.scene.terrain.terrain_generator.num_cols = _active_subterrain_count(self.scene.terrain.terrain_generator)
         self.commands.base_velocity.ranges = deepcopy(self.commands.base_velocity.limit_ranges)
         self.observations.policy_terrain_obs.enable_corruption = False
