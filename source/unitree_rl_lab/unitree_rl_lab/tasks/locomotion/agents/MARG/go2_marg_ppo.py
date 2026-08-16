@@ -7,6 +7,14 @@ from isaaclab.utils.string import string_to_callable
 
 from .go2_marg_rollout_storage import Go2MargRolloutStorage
 
+
+# Layout of privileged_obs in go2_marg_risk_terrain_env_cfg.py:
+# [0:3]   real_linear_velocity
+# [3:7]   feet_contacts
+PRIV_REAL_LINEAR_VEL = slice(0, 3)
+PRIV_FEET_CONTACTS = slice(3, 7)
+
+
 class Go2MargPPO:
     def __init__(
         self,
@@ -25,6 +33,9 @@ class Go2MargPPO:
         desired_kl=0.01,
         device="cpu",
         normalize_advantage_per_mini_batch=False,
+        estimator_loss_coef=1.0,
+        velocity_loss_coef=1.0,
+        contact_loss_coef=1.0,
         symmetry_cfg=None,
         **kwargs,
     ):
@@ -47,6 +58,9 @@ class Go2MargPPO:
         self.schedule = schedule
         self.learning_rate = learning_rate
         self.normalize_advantage_per_mini_batch = normalize_advantage_per_mini_batch
+        self.estimator_loss_coef = estimator_loss_coef
+        self.velocity_loss_coef = velocity_loss_coef
+        self.contact_loss_coef = contact_loss_coef
         self.symmetry_cfg = symmetry_cfg
         self.use_data_augmentation = self._get_symmetry_cfg_value("use_data_augmentation", False)
         self.use_mirror_loss = self._get_symmetry_cfg_value("use_mirror_loss", False)
@@ -160,6 +174,9 @@ class Go2MargPPO:
         mean_value_loss = 0.0
         mean_surrogate_loss = 0.0
         mean_entropy = 0.0
+        mean_velocity_loss = 0.0
+        mean_contact_loss = 0.0
+        mean_estimator_loss = 0.0
         mean_mirror_loss = 0.0
 
         generator = self.storage.mini_batch_generator(self.num_mini_batches, self.num_learning_epochs)
@@ -224,6 +241,7 @@ class Go2MargPPO:
             actions_log_prob_batch = self.policy.get_actions_log_prob(actions_batch)
             value_batch = self.policy.evaluate(critic_obs_batch)
             entropy_batch = self.policy.entropy
+            est_batch = self.policy.estimate(obs_batch)
             ratio = torch.exp(actions_log_prob_batch - torch.squeeze(old_actions_log_prob_batch))
             surrogate = -torch.squeeze(advantages_batch) * ratio
             surrogate_clipped = -torch.squeeze(advantages_batch) * torch.clamp(
@@ -241,10 +259,21 @@ class Go2MargPPO:
             else:
                 value_loss = (returns_batch - value_batch).pow(2).mean()
 
+            privileged_obs_batch = critic_obs_batch["privileged_obs"]
+            vel_target = privileged_obs_batch[:, PRIV_REAL_LINEAR_VEL]
+            contact_target = privileged_obs_batch[:, PRIV_FEET_CONTACTS]
+            vel_pred = est_batch[:, :3]
+            contact_pred = est_batch[:, 3:7]
+
+            velocity_loss = torch.nn.functional.mse_loss(vel_pred, vel_target)
+            contact_loss = torch.nn.functional.binary_cross_entropy_with_logits(contact_pred, contact_target)
+            estimator_loss = self.velocity_loss_coef * velocity_loss + self.contact_loss_coef * contact_loss
+
             loss = (
                 surrogate_loss
                 + self.value_loss_coef * value_loss
                 - self.entropy_coef * entropy_batch.mean()
+                + self.estimator_loss_coef * estimator_loss
                 + self.mirror_loss_coeff * mirror_loss
             )
 
@@ -256,6 +285,9 @@ class Go2MargPPO:
             mean_value_loss += value_loss.item()
             mean_surrogate_loss += surrogate_loss.item()
             mean_entropy += entropy_batch.mean().item()
+            mean_velocity_loss += velocity_loss.item()
+            mean_contact_loss += contact_loss.item()
+            mean_estimator_loss += estimator_loss.item()
             mean_mirror_loss += mirror_loss.item()
             num_updates += 1
 
@@ -264,5 +296,8 @@ class Go2MargPPO:
             "value": mean_value_loss / num_updates,
             "surrogate": mean_surrogate_loss / num_updates,
             "entropy": mean_entropy / num_updates,
+            "velocity": mean_velocity_loss / num_updates,
+            "contact": mean_contact_loss / num_updates,
+            "estimator": mean_estimator_loss / num_updates,
             "mirror": mean_mirror_loss / num_updates,
         }

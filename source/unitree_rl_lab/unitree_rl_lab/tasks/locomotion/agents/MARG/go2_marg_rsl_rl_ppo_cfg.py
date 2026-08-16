@@ -35,7 +35,9 @@ class Go2MargActorCriticCfg(RslRlPpoActorCriticCfg):
 
 @configclass
 class Go2MargPPOAlgorithmCfg(RslRlPpoAlgorithmCfg):
-    pass
+    estimator_loss_coef = 1.0
+    velocity_loss_coef = 1.0
+    contact_loss_coef = 0.5
 
 
 @configclass
@@ -108,9 +110,9 @@ class Go2MargRiskTerrainPPORunnerCfg(Go2MargPPORunnerCfg):
         desired_kl=0.01,
         max_grad_norm=1.0,
         symmetry_cfg=RslRlSymmetryCfg(
-            use_data_augmentation=False,
-            mirror_loss_coeff=0.0,
-            use_mirror_loss=False,
+            use_data_augmentation=True,
+            mirror_loss_coeff=0.1,
+            use_mirror_loss=True,
             data_augmentation_func=compute_symmetric_states_go2_marg,
         ),
     )

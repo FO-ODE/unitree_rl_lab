@@ -211,13 +211,7 @@ def _single_bridge_terrain(
 ):
     depth_units = -abs(_height_to_units(terrain, depth))
     terrain.height_field_raw[:, :] = depth_units
-    # With 10 curriculum rows, pin the two hardest rows to fixed bridge widths.
-    if difficulty >= 0.9:
-        bridge_width = max(1, _meter_to_index(terrain, 0.15))
-    elif difficulty >= 0.8:
-        bridge_width = max(1, _meter_to_index(terrain, 0.20))
-    else:
-        bridge_width = max(3, _meter_to_index(terrain, max(0.15, 0.8 - 0.65 * difficulty)))
+    bridge_width = max(3, _meter_to_index(terrain, max(0.2, 0.8 - 0.6 * difficulty)))
     y0 = terrain.length // 2 - bridge_width // 2
     _fill_rect(terrain, 0, terrain.width, y0, y0 + bridge_width, 0)
     _clear_start_platform(terrain, platform_size)

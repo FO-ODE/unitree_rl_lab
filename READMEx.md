@@ -62,6 +62,12 @@ python scripts/rsl_rl/play.py   --task Unitree-Go2-MARG-Risk-Terrain   --jit_pol
   --task Unitree-Go2-MARG-Risk-Terrain \
   --checkpoint logs/rsl_rl/go2_marg_risk_terrain/2026-07-31_18-17-19/model_29999.pt \
   --keyboard
+
+./unitree_rl_lab.sh -t \
+  --task Unitree-Go2-MARG-Risk-Terrain \
+  --resume \
+  --load_run 2026-08-07_15-55-23 \
+  --checkpoint model_29999.pt
 ```
 
 ## Tensorboard

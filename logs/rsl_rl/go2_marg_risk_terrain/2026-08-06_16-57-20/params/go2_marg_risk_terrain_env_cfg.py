@@ -865,7 +865,7 @@ class RewardsCfg:
     base_angular_velocity_xy = RewTerm(func=mdp.ang_vel_xy_l2, weight=-0.05)
     joint_torques = RewTerm(func=mdp.joint_torques_l2, weight=-1.0e-5)
     action_rate = RewTerm(func=mdp.action_rate_l2, weight=-0.01)
-    action_smoothness = RewTerm(func=action_smoothness_l2, weight=-0.01) # This action_smoothness term can cause training instability.
+    action_smoothness = RewTerm(func=action_smoothness_l2, weight=-0.01)
     joint_acc = RewTerm(func=mdp.joint_acc_l2, weight=-2.5e-7)
 
     # -- safety

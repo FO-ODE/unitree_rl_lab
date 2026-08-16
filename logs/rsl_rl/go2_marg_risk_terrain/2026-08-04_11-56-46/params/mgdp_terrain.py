@@ -24,10 +24,10 @@ MGDP_GAP_PARKOUR_WEIGHTS_STAGE2 = {
     "single_gap": 0.1,
     "stone_everywhere": 0.1,
     "stones_2rows": 0.1,
-    "stones_2rows_staggered": 0.1,
+    "stones_2rows_staggered": 0.0,
     "stones_1row": 0.1,
     "single_bridge": 0.1,
-    "stairs": 0.1,
+    "stairs": 0.0,
     "beams": 0.1,
     "air_beams": 0.1,
     "air_stairs": 0.1,
@@ -211,13 +211,7 @@ def _single_bridge_terrain(
 ):
     depth_units = -abs(_height_to_units(terrain, depth))
     terrain.height_field_raw[:, :] = depth_units
-    # With 10 curriculum rows, pin the two hardest rows to fixed bridge widths.
-    if difficulty >= 0.9:
-        bridge_width = max(1, _meter_to_index(terrain, 0.15))
-    elif difficulty >= 0.8:
-        bridge_width = max(1, _meter_to_index(terrain, 0.20))
-    else:
-        bridge_width = max(3, _meter_to_index(terrain, max(0.15, 0.8 - 0.65 * difficulty)))
+    bridge_width = max(3, _meter_to_index(terrain, max(0.2, 0.8 - 0.6 * difficulty)))
     y0 = terrain.length // 2 - bridge_width // 2
     _fill_rect(terrain, 0, terrain.width, y0, y0 + bridge_width, 0)
     _clear_start_platform(terrain, platform_size)
